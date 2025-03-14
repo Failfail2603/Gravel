@@ -1,63 +1,136 @@
-use async_nats::Client;
-use std::process::{Child, Command};
+pub mod mongo_connection;
+pub mod nats_server;
+
+use async_nats::Client as NatsClient;
+use mongodb::bson::Document;
+use mongodb::change_stream::event::OperationType;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::signal::ctrl_c;
 use tokio::time::{sleep, Duration};
 
-// Structure to manage the NATS server child process
-struct NatsServer {
-    process: Child,
-}
+async fn run_mongo_oplog_watching(shutdown: Arc<AtomicBool>) {
+    // MongoDB connection parameters
+    let mongo_connection = "mongodb://localhost:27017";
+    let mongo_database = "gravel_db";
 
-impl NatsServer {
-    // Start a new NATS server process
-    fn start() -> Result<Self, std::io::Error> {
-        println!("Starting NATS server...");
-        
-        // Start the NATS server as a child process
-        // Adjust the command based on how NATS is installed on your system
-        let process = Command::new("/nats-server-v2.10.26-windows-amd64/nats-server")
-            .spawn()?;
-            
-        println!("NATS server started with PID: {}", process.id());
-        
-        // Give the server a moment to start up
-        std::thread::sleep(Duration::from_secs(2));
-        
-        Ok(NatsServer { process })
-    }
-}
+    println!("Starting MongoDB oplog watching...");
 
-impl Drop for NatsServer {
-    // Ensure the NATS server is killed when this object is dropped
-    fn drop(&mut self) {
-        println!("Shutting down NATS server...");
-        
-        // Try to kill the process gracefully
-        match self.process.kill() {
-            Ok(_) => println!("NATS server stopped successfully"),
-            Err(e) => eprintln!("Failed to stop NATS server: {}", e),
-        }
-    }
-}
+    let database =
+        match mongo_connection::get_mongo_connection(mongo_connection, mongo_database).await {
+            Ok(db) => db,
+            Err(e) => {
+                eprintln!("Error on getting MongoDB connection: {}", e);
+                return;
+            }
+        };
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Start the NATS server
-    let _nats_server = match NatsServer::start() {
-        Ok(server) => server,
+    // Create a change stream pipeline to watch all operations
+    // You can customize this pipeline to filter specific operations or collections
+    let pipeline = vec![];
+
+    let mut stream = match database
+        .collection::<Document>("watch_test")
+        .watch().pipeline(pipeline.clone())
+        .await
+    {
+        Ok(stream) => stream,
         Err(e) => {
-            eprintln!("Failed to start NATS server: {}", e);
-            return Err(Box::new(e));
+            eprintln!("Error on getting MongoDB change stream: {}", e);
+            return;
         }
     };
 
-    // Flag to track shutdown status
+    // Process MongoDB change stream events until shutdown is signaled
+    println!("Watching for MongoDB changes...");
+    let mut resume_token = None;
+    while stream.is_alive() {
+        let change = stream.next_if_any().await;
+
+        if shutdown.load(Ordering::SeqCst) {
+            println!("Shutting down MongoDB oplog watching...");
+            break;
+        }
+
+        match change {
+            Ok(Some(change)) => {
+                // Process the change event
+                println!("Received MongoDB change: {:?}", change);
+
+                // Here you can add logic to handle different types of operations
+                let op_type = change.operation_type;
+
+                    match op_type {
+                        OperationType::Insert => {
+                            println!("Insert operation detected");
+                            // Handle insert operation
+                        },
+                        OperationType::Update => {
+                            println!("Update operation detected");
+                            // Handle update operation
+                        },
+                        OperationType::Delete => {
+                            println!("Delete operation detected");
+                            // Handle delete operation
+                        },
+                        OperationType::Replace => {
+                            println!("Replace operation detected");
+                            // Handle replace operation
+                        },
+                        _ => {
+                            println!("Other operation type: {:?}", op_type);
+                            // Handle other operation types
+                        }
+                    }
+
+            },
+            Ok(None) => {
+                println!("No changes detected");
+            }
+            Err(e) => {
+                eprintln!("Error on getting MongoDB change: {}", e);
+
+                // Try to reconnect after a brief pause
+                sleep(Duration::from_secs(1)).await;
+
+                // Attempt to recreate the change stream
+                match database
+                    .collection::<Document>("watch_test")
+                    .watch().pipeline(pipeline.clone())
+                    .await
+                {
+                    Ok(new_stream) => {
+                        stream = new_stream;
+                        println!("Successfully reconnected to MongoDB change stream");
+                    },
+                    Err(reconnect_err) => {
+                        eprintln!("Failed to reconnect to MongoDB change stream: {}", reconnect_err);
+
+                        // If we can't reconnect, check if we should exit
+                        if shutdown.load(Ordering::SeqCst) {
+                            break;
+                        }
+
+                        // Wait before trying again
+                        sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
+        }
+    
+        resume_token = stream.resume_token();
+    }
+
+    println!("MongoDB oplog watching stopped");
+}
+
+#[tokio::main]
+async fn main() {
+    // Handle to shutdown the application gracefully
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
 
-    // Set up signal handler for graceful shutdown
+    // Setup Ctrl+C handler
     tokio::spawn(async move {
         if let Err(e) = ctrl_c().await {
             eprintln!("Failed to listen for ctrl+c: {}", e);
@@ -67,42 +140,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shutdown_clone.store(true, Ordering::SeqCst);
     });
 
-    // Connect to the NATS server
-    println!("Connecting to NATS...");
-    let client = async_nats::connect("nats://localhost:4222").await;
-    println!("Connected to NATS server");
-
-    // Subscribe to the default channel
-    let mut subscriber = client.subscribe("default".into()).await;
-    println!("Subscribed to 'default' channel");
-
-    // Process messages until shutdown signal is received
-    while !shutdown.load(Ordering::SeqCst) {
-        tokio::select! {
-            message = subscriber.next() => {
-                match message {
-                    Some(msg) => {
-                        let payload = String::from_utf8_lossy(&msg.payload);
-                        println!("Received message: {}", payload);
-                    },
-                    None => {
-                        println!("Subscription closed");
-                        break;
-                    }
-                }
-            },
-            _ = sleep(Duration::from_millis(100)) => {
-                // Just a small delay to prevent CPU spinning
-            }
+    // Start the NATS server and get a client connection
+    let nats_client = match nats_server::get_nats_server_connection(
+        "./nats-server-v2.10.26-windows-amd64/nats-server",
+        "nats://localhost:4222",
+    )
+    .await
+    {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Error on getting NATS client: {}", e);
+            return;
         }
-    }
+    };
 
-    println!("Shutting down client...");
-    client.close().await?;
-    println!("Client shut down successfully");
+    run_mongo_oplog_watching(shutdown).await;
 
-    // The NatsServer will be dropped automatically when it goes out of scope,
-    // which will kill the child process due to the Drop implementation
+    println!("Shutting down...");
 
-    Ok(())
+    nats_server::drop_manually();
 }

@@ -1,0 +1,27 @@
+version: "3.8"
+services:
+  mongo:
+    command:
+      - bash
+      - -c
+      - set -m; mongod --replSet rs0 --bind_ip_all & sleep 10; mongosh --eval 'rs.initiate()'; fg 1;
+    container_name: mongo
+    hostname: mongo
+    init: true
+    image: mongo:latest
+    networks:
+      mongo:
+    ports:
+      - 27017:27017
+    restart: unless-stopped
+    volumes:
+      - db:/data/db
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+volumes:
+  db:
+networks:
+  mongo:
+    name: mongo
