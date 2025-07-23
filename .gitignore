@@ -1,3 +1,2 @@
-nats-server-v2.10.26-windows-amd64
 .env
-target
+node_modules
