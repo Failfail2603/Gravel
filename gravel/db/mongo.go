@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -18,29 +17,26 @@ type MongoProvider struct {
 	changeStreams map[string]*mongo.ChangeStream
 	stopChannels  map[string]chan struct{}
 	mu            sync.RWMutex
+	MongoUrl      string
 }
 
-// NewMongoProvider creates a new MongoDB provider instance
-func NewMongoProvider() *MongoProvider {
+// generateMongoProvider creates a new MongoDB provider instance
+func generateMongoProvider(connectionRequest DatabaseConnectRequest) *MongoProvider {
 	return &MongoProvider{
 		changeStreams: make(map[string]*mongo.ChangeStream),
 		stopChannels:  make(map[string]chan struct{}),
+		MongoUrl:      connectionRequest.MongoURL,
 	}
 }
 
 // Connect establishes a connection to MongoDB
 func (m *MongoProvider) connect() error {
-	mongoURI := os.Getenv("MONGODB_URI")
-	if mongoURI == "" {
-		return fmt.Errorf("MONGODB_URI environment variable is not set")
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	options := options.Client().ApplyURI(mongoURI).SetReplicaSet("rs0").SetDirect(true)
+	options := options.Client().ApplyURI(m.MongoUrl).SetReplicaSet("rs0").SetDirect(true)
 
-	log.Println("Connecting to MongoDB...", mongoURI)
+	log.Println("Connecting to MongoDB...", m.MongoUrl)
 	client, err := mongo.Connect(ctx, options)
 	if err != nil {
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)
@@ -57,7 +53,7 @@ func (m *MongoProvider) connect() error {
 }
 
 // Disconnect closes the MongoDB connection
-func (m *MongoProvider) Disconnect() error {
+func (m *MongoProvider) disconnect() error {
 	if m.client == nil {
 		return nil
 	}
@@ -81,7 +77,7 @@ func (m *MongoProvider) Disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) StartChangeStream(db string, collection string, dbUpdates chan DBChangeStreamEvent) {
+func (m *MongoProvider) startChangeStream(db string, collection string, dbUpdates chan DBChangeStreamEvent) {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot start change stream for %s.%s", db, collection)
 		return
@@ -119,7 +115,7 @@ func (m *MongoProvider) StartChangeStream(db string, collection string, dbUpdate
 }
 
 // StopChangeStream stops monitoring changes for a specific database and collection
-func (m *MongoProvider) StopChangeStream(db string, collection string) {
+func (m *MongoProvider) stopChangeStream(db string, collection string) {
 	key := fmt.Sprintf("%s.%s", db, collection)
 
 	m.mu.Lock()

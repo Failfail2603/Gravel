@@ -2,38 +2,17 @@ package db
 
 import (
 	"fmt"
-	"time"
 )
 
-type DBChangeStreamEvent struct {
-	Database  string      `json:"database"`
-	Operation string      `json:"operation"`
-	Document  interface{} `json:"document"`
-	Timestamp time.Time   `json:"timestamp"`
-}
-
-type DatabaseConnectRequest struct {
-	Database string `json:"database"`
-	ClientID string `json:"client_id"`
-}
-
-type DatabaseConnectResponse struct {
-	Status   string `json:"status"`
-	Database string `json:"database"`
-	Error    string `json:"error"`
-}
-
-type DBType string
-
 const (
-	DBTypeMongoDB DBType = "mongodb"
+	DBTypeMongoDB string = "mongodb"
 )
 
 type DBProvider interface {
 	connect() error
-	Disconnect() error
-	StartChangeStream(db string, collection string, dbUpdates chan DBChangeStreamEvent)
-	StopChangeStream(db string, collection string)
+	disconnect() error
+	startChangeStream(db string, collection string, dbUpdates chan DBChangeStreamEvent)
+	stopChangeStream(db string, collection string)
 }
 
 type DBService struct {
@@ -50,11 +29,22 @@ func newDBService(service DBProvider) (*DBService, error) {
 
 // StartDBConnection initializes and returns a DBService for the specified database type.
 // It currently supports only MongoDB. Returns nil if the database type is unsupported.
-func StartDBConnection(db DBType) (*DBService, error) {
-	switch db {
+func StartDBConnection(connectionRequest DatabaseConnectRequest) (*DBService, error) {
+	switch connectionRequest.DBType {
 	case DBTypeMongoDB:
-		return newDBService(NewMongoProvider())
+		return newDBService(generateMongoProvider(connectionRequest))
 	default:
-		return nil, fmt.Errorf("unsupported database type: %s", db)
+		return nil, fmt.Errorf("unsupported database type: %s", connectionRequest.DBType)
+	}
+}
+
+// as different dbs can be supported and the als hear to the same request we need to have different identifiers for each db type in the dbServices map
+// this function returns the identifier for the given connection request. For example for mongo this can just be the mongo url
+func getDBConnectionIdentifier(connectionRequest DatabaseConnectRequest) (string, error) {
+	switch connectionRequest.DBType {
+	case DBTypeMongoDB:
+		return connectionRequest.MongoURL, nil
+	default:
+		return "", fmt.Errorf("unsupported database type: %s", connectionRequest.DBType)
 	}
 }

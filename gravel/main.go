@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// Initialize the Gravel server
-	gravelServer := NewGravelServer(natsConnection)
+	gravelServer := generateGravelServer(natsConnection)
 
 	log.Println("Gravel server started successfully")
 

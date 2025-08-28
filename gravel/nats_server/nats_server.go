@@ -79,3 +79,7 @@ func StartNatsServer() (*NatsConnection, error) {
 func (natsInterface *NatsConnection) SubscribeTo(subject string, callback nats.MsgHandler) {
 	natsInterface.natsConn.Subscribe(subject, callback)
 }
+
+func (natsInterface *NatsConnection) Publish(subject string, data string) {
+	natsInterface.natsConn.Publish(subject, []byte(data))
+}

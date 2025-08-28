@@ -42,7 +42,8 @@ def generate_user_data():
     return {
         "email": fake.email(),
         "birthday": birthday,
-        "debitor": random.randint(1000, 999999)  # Random debitor number
+        "debitor": random.randint(1000, 999999),  # Random debitor number
+        "role": random.choice(["user", "admin", "moderator"]),
     }
 
 
