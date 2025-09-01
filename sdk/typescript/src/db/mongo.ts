@@ -1,8 +1,10 @@
 import type { NatsConnection } from "nats";
 import { Observable } from "rxjs/internal/Observable";
+import { v4 as uuidv4 } from "uuid";
 import { GravelDBs } from "../gravel";
 import { GravelChannels } from "../gravelChannels";
 import type { GravelDatabaseConnectRequest } from "../natsMessages";
+import type { GravelClient } from "./gravelClient";
 
 // #region Mongo search types
 
@@ -46,8 +48,8 @@ export interface GravelMongoWatchQueryFindOptions {
 }
 
 export interface GravelMongoWatchQueryRequest {
+  clientID: string;
   hash: string;
-  database: string;
   collectionName: string;
   query: Record<string, any>;
   options?: GravelMongoWatchQueryFindOptions;
@@ -72,15 +74,15 @@ export interface GravelMongoOptions {
   mongoUrl: string;
 }
 
-export interface GravelMongoClient {
+export interface GravelMongoClient extends GravelClient {
   watchQuery<T extends Record<string, any>>(
     collectionName: string,
     query: Record<string, any>,
     options?: GravelMongoWatchQueryFindOptions,
-  ): {
+  ): Promise<{
     initialQuery: Array<T>;
     changes: Observable<Array<T>>;
-  };
+  }>;
 }
 
 /**
@@ -135,9 +137,11 @@ function hashQuery(
 
 export async function generateMongoProvider(
   natsConnection: NatsConnection,
-  clientID: string,
   options: GravelMongoOptions,
 ): Promise<GravelMongoClient> {
+  // build a client id for the provider
+  const clientID = uuidv4();
+
   // on getting the mongo provider, the sdk sends a connection request to gravel to ensure the database is correcly loaded.
   // gravel connects to the database and holds a connection open for all clients
   await natsConnection.request(
@@ -155,7 +159,12 @@ export async function generateMongoProvider(
   );
 
   // the client gets a unique channel per client. Watchqueries are shared on one client and split to the corresponding queries
-  const watchQueryChannel = "gravel.mongo.watchquery" + clientID;
+  const watchQueryChannel = "gravel.mongo.watchquery." + clientID;
+
+  // generate the db provider id unique to the connection setting.
+  // same connections will result in the same id
+  // the mongo url should be unique in this case
+  const dbProviderID = options.mongoUrl;
 
   // the active subscriptions of the client
   // the key will be a hash of the query so we can hold multiple handles and observables for the same kind of query and multiplex them on arrival
@@ -180,20 +189,26 @@ export async function generateMongoProvider(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
 
-      console.log(msg);
+      // TODO response has the client id to multiplex to the correct observable
+
+      // TODO update the right observable with the message
+
+      console.log(response);
     },
   });
 
   return {
     // the watchquery function
-    watchQuery<T extends Record<string, any>>(
+    clientID,
+    dbProviderID,
+    async watchQuery<T extends Record<string, any>>(
       collectionName: string,
       query: Record<string, any>,
       options?: GravelMongoWatchQueryFindOptions,
-    ): {
+    ): Promise<{
       initialQuery: Array<T>;
       changes: Observable<Array<T>>;
-    } {
+    }> {
       const updateObservable = new Observable<Array<T>>();
 
       // gravel gets a unique channel for every client, which is shared between watchqueries.
@@ -201,13 +216,14 @@ export async function generateMongoProvider(
       const queryHash = hashQuery(collectionName, query, options);
 
       // call gravel to register the query
-      natsConnection.request(
-        watchQueryChannel,
+      await natsConnection.request(
+        "gravel.watchquery",
         JSON.stringify({
+          clientID,
           hash: queryHash,
           collectionName,
-          query,
-          options,
+          query: JSON.stringify(query),
+          options: JSON.stringify(options),
         } satisfies GravelMongoWatchQueryRequest),
         {
           timeout: 5000,

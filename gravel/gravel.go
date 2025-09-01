@@ -53,7 +53,7 @@ func (gravel *GravelServer) listenToConnects() {
 
 		// check if a connection to the requested database already exists
 		// if not create a new connection
-		if _, exists := gravel.dbServices[req.MongoURL]; !exists {
+		if _, exists := gravel.dbServices[req.ClientID]; !exists {
 
 			service, err := db.StartDBConnection(req)
 
@@ -69,7 +69,7 @@ func (gravel *GravelServer) listenToConnects() {
 				m.Respond(responseData)
 				return
 			}
-			gravel.dbServices[req.MongoURL] = service
+			gravel.dbServices[req.ClientID] = service
 		}
 
 		// Send success response
@@ -82,6 +82,85 @@ func (gravel *GravelServer) listenToConnects() {
 	})
 
 	gravel.natsConnection.SubscribeTo("gravel.watchquery", func(m *nats.Msg) {
+		log.Println("Received gravel.watchquery request")
+		var req db.WatchQueryRequest
+
+		// check if request is valid and parse it to internal type
+		//
+		if err := json.Unmarshal(m.Data, &req); err != nil {
+			response := db.WatchQueryResponse{
+				Status: "error",
+				Error:  err.Error(),
+			}
+			responseData, _ := json.Marshal(response)
+			log.Println(response.Error)
+			m.Respond(responseData)
+			return
+		}
+
+		var dbService *db.DBService = gravel.dbServices[req.ClientID]
+
+		if dbService == nil {
+			response := db.WatchQueryResponse{
+				Status: "error",
+				Error:  "No database connection found for client " + req.ClientID,
+			}
+			responseData, _ := json.Marshal(response)
+			log.Println(response.Error)
+			m.Respond(responseData)
+			return
+		}
+
+		// check if the watchquery already exists with the hash. Different clients can have the same watchquery.
+		// we need to ensure that all unique clients in the
+		watchQuery := dbService.WatchQueries[req.Hash]
+
+		// if yes we just count up the connections count. We do not need to do anything else as gravel already sends updates down the channel
+		if watchQuery != nil {
+			watchQuery.NumberOfConnections++
+			response := db.WatchQueryResponse{
+				Status: "success",
+			}
+			responseData, _ := json.Marshal(response)
+			log.Println(response.Error)
+			m.Respond(responseData)
+			return
+		}
+
+		// if the watchqueries are empty we need to start the change stream
+		var shouldStartChangeStream bool = len(dbService.WatchQueries) == 0
+
+		// if no we create a new watchquery and start the change stream
+
+		dbService.WatchQueries[req.Hash] = &db.WatchQuery{
+			ClientID:            req.ClientID,
+			Hash:                req.Hash,
+			Collection:          req.CollectionName,
+			Query:               req.Query,
+			Options:             req.Options,
+			NumberOfConnections: 1,
+		}
+
+		updateChannel := make(chan db.DBChangeStreamEvent)
+
+		if shouldStartChangeStream {
+			dbService.Connection.StartChangeStream(updateChannel)
+		}
+
+		go func() {
+			for update := range updateChannel {
+				log.Println("Sending update to client", req.ClientID)
+				updateJson, _ := json.Marshal(update)
+				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(updateJson))
+			}
+		}()
+
+		response := db.WatchQueryResponse{
+			Status: "success",
+		}
+		responseData, _ := json.Marshal(response)
+		log.Println(response.Error)
+		m.Respond(responseData)
 
 	})
 }

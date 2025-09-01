@@ -9,22 +9,39 @@ const (
 )
 
 type DBProvider interface {
-	connect() error
-	disconnect() error
-	startChangeStream(db string, collection string, dbUpdates chan DBChangeStreamEvent)
-	stopChangeStream(db string, collection string)
+	Connect() error
+	Disconnect() error
+	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
+	StopChangeStream()
+}
+
+type WatchQuery struct {
+	ClientID   string
+	Hash       string
+	Collection string
+	Query      string
+	Options    string
+
+	// we dedube watchqueries by hash, so we need to count the number of connections to the same watchquery
+	// the multiplexing to the different queries observables will be handled by the client
+	NumberOfConnections int
 }
 
 type DBService struct {
 	Connection DBProvider
+
+	/**
+	 * The currently open WatchQueries on the database client
+	 */
+	WatchQueries map[string]*WatchQuery
 }
 
 func newDBService(service DBProvider) (*DBService, error) {
-	if err := service.connect(); err != nil {
+	if err := service.Connect(); err != nil {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
 	}
 
-	return &DBService{Connection: service}, nil
+	return &DBService{Connection: service, WatchQueries: make(map[string]*WatchQuery)}, nil
 }
 
 // StartDBConnection initializes and returns a DBService for the specified database type.

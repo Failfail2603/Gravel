@@ -1,5 +1,5 @@
 import { connect, type Msg, type NatsConnection, type NatsError } from "nats";
-import { v4 as uuidv4 } from "uuid";
+import { type GravelClient } from "./db/gravelClient";
 import {
   generateMongoProvider,
   type GravelMongoClient,
@@ -32,8 +32,19 @@ type DatabaseOptionsClientMap = {
   [GravelDBs.Redis]: GravelRedisOptions;
 };
 
+function getDBProviderID<T extends GravelDBs>(
+  options: { db: T } & DatabaseOptionsClientMap[T],
+): string {
+  switch (options.db) {
+    case GravelDBs.MongoDB:
+      // @ts-expect-error we guarded the type via the function definitions and the switch
+      return options.mongoUrl;
+    case GravelDBs.Redis:
+      return "redis";
+  }
+}
+
 export interface Gravel {
-  clientID: string;
   getDatabaseClient<T extends GravelDBs>(
     options: {
       db: T;
@@ -47,7 +58,7 @@ export interface Gravel {
  */
 let gravelInstance: Gravel | null = null;
 
-const databaseClients: Map<GravelDBs, DatabaseClientMap> = new Map();
+const databaseClients: Map<string, GravelClient> = new Map();
 
 /**
  * Connects to Gravel initially and returns a NatsConnection
@@ -84,17 +95,18 @@ export async function getGravelConnection(
 
   const natsConnection = await connectToGravel(options);
 
-  const clientID = uuidv4();
-
   gravelInstance = {
-    clientID,
     getDatabaseClient: <T extends GravelDBs>(
       options: {
         db: T;
       } & DatabaseOptionsClientMap[T],
     ): Promise<DatabaseClientMap[T]> => {
       return new Promise(async (resolve, reject) => {
-        let existingClient = databaseClients.get(options.db) as
+        // we make sure we only create one client per type and connection
+
+        const dbProviderID = getDBProviderID(options);
+
+        let existingClient = databaseClients.get(dbProviderID) as
           | DatabaseClientMap[T]
           | undefined;
 
@@ -107,14 +119,13 @@ export async function getGravelConnection(
           case GravelDBs.MongoDB:
             existingClient = (await generateMongoProvider(
               natsConnection,
-              clientID,
               options as GravelMongoOptions,
             )) as DatabaseClientMap[T];
             break;
           case GravelDBs.Redis:
             existingClient = (await generateRedisProvider(
               natsConnection,
-              clientID,
+
               options as GravelRedisOptions,
             )) as DatabaseClientMap[T];
             break;
@@ -128,6 +139,8 @@ export async function getGravelConnection(
             new Error(`Failed to create database client for ${options.db}`),
           );
         }
+
+        databaseClients.set(existingClient.dbProviderID, existingClient);
 
         resolve(existingClient as DatabaseClientMap[T]);
       });

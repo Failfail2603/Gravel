@@ -30,7 +30,7 @@ func generateMongoProvider(connectionRequest DatabaseConnectRequest) *MongoProvi
 }
 
 // Connect establishes a connection to MongoDB
-func (m *MongoProvider) connect() error {
+func (m *MongoProvider) Connect() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -53,7 +53,7 @@ func (m *MongoProvider) connect() error {
 }
 
 // Disconnect closes the MongoDB connection
-func (m *MongoProvider) disconnect() error {
+func (m *MongoProvider) Disconnect() error {
 	if m.client == nil {
 		return nil
 	}
@@ -77,46 +77,43 @@ func (m *MongoProvider) disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) startChangeStream(db string, collection string, dbUpdates chan DBChangeStreamEvent) {
+func (m *MongoProvider) StartChangeStream(dbUpdates chan DBChangeStreamEvent) {
 	if m.client == nil {
-		log.Printf("MongoDB client not connected, cannot start change stream for %s.%s", db, collection)
+		log.Printf("MongoDB client not connected, cannot start change stream for %s", m.MongoUrl)
 		return
 	}
-
-	key := fmt.Sprintf("%s.%s", db, collection)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Stop existing change stream if it exists
-	if _, exists := m.changeStreams[key]; exists {
-		m.stopChangeStreamInternal(key)
+	if _, exists := m.changeStreams[m.MongoUrl]; exists {
+		m.stopChangeStreamInternal(m.MongoUrl)
 	}
 
 	// Create change stream options
 	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
 
 	// Start change stream
-	coll := m.client.Database(db).Collection(collection)
-	changeStream, err := coll.Watch(context.Background(), mongo.Pipeline{}, opts)
+	changeStream, err := m.client.Watch(context.Background(), mongo.Pipeline{}, opts)
 	if err != nil {
-		log.Printf("Failed to start change stream for %s.%s: %v", db, collection, err)
+		log.Printf("Failed to start change stream for %s: %v", m.MongoUrl, err)
 		return
 	}
 
 	stopChan := make(chan struct{})
-	m.changeStreams[key] = changeStream
-	m.stopChannels[key] = stopChan
+	m.changeStreams[m.MongoUrl] = changeStream
+	m.stopChannels[m.MongoUrl] = stopChan
 
 	// Start goroutine to handle change stream events
-	go m.handleChangeStream(key, db, collection, changeStream, dbUpdates, stopChan)
+	go m.handleChangeStream(changeStream, dbUpdates, stopChan)
 
-	log.Printf("Started change stream for %s.%s", db, collection)
+	log.Printf("Started change stream for %s", m.MongoUrl)
 }
 
 // StopChangeStream stops monitoring changes for a specific database and collection
-func (m *MongoProvider) stopChangeStream(db string, collection string) {
-	key := fmt.Sprintf("%s.%s", db, collection)
+func (m *MongoProvider) StopChangeStream() {
+	key := m.MongoUrl
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -139,36 +136,36 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 }
 
 // handleChangeStream processes change stream events
-func (m *MongoProvider) handleChangeStream(key, db, collection string, changeStream *mongo.ChangeStream, dbUpdates chan DBChangeStreamEvent, stopChan chan struct{}) {
+func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan DBChangeStreamEvent, stopChan chan struct{}) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Change stream handler for %s panicked: %v", key, r)
+			log.Printf("Change stream handler for %s panicked: %v", m.MongoUrl, r)
 		}
 	}()
 
 	for {
 		select {
 		case <-stopChan:
-			log.Printf("Change stream for %s stopped", key)
+			log.Printf("Change stream for %s stopped", m.MongoUrl)
 			return
 		default:
 			if !changeStream.Next(context.Background()) {
 				if err := changeStream.Err(); err != nil {
-					log.Printf("Change stream error for %s: %v", key, err)
+					log.Printf("Change stream error for %s: %v", m.MongoUrl, err)
 				}
 				return
 			}
 
 			var changeEvent bson.M
 			if err := changeStream.Decode(&changeEvent); err != nil {
-				log.Printf("Failed to decode change event for %s: %v", key, err)
+				log.Printf("Failed to decode change event for %s: %v", m.MongoUrl, err)
 				continue
 			}
 
 			// Extract operation type
 			operation, ok := changeEvent["operationType"].(string)
 			if !ok {
-				log.Printf("Invalid operation type in change event for %s", key)
+				log.Printf("Invalid operation type in change event for %s", m.MongoUrl)
 				continue
 			}
 
@@ -184,7 +181,7 @@ func (m *MongoProvider) handleChangeStream(key, db, collection string, changeStr
 
 			// Create and send change event
 			event := DBChangeStreamEvent{
-				Database:  db,
+				Database:  m.MongoUrl,
 				Operation: operation,
 				Document:  document,
 				Timestamp: time.Now(),
@@ -192,12 +189,12 @@ func (m *MongoProvider) handleChangeStream(key, db, collection string, changeStr
 
 			select {
 			case dbUpdates <- event:
-				log.Printf("Sent change event for %s: %s", key, operation)
+				log.Printf("Sent change event for %s: %s", m.MongoUrl, operation)
 			case <-stopChan:
-				log.Printf("Change stream for %s stopped while sending event", key)
+				log.Printf("Change stream for %s stopped while sending event", m.MongoUrl)
 				return
 			default:
-				log.Printf("Channel blocked, dropping change event for %s", key)
+				log.Printf("Channel blocked, dropping change event for %s", m.MongoUrl)
 			}
 		}
 	}

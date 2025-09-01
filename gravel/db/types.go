@@ -21,3 +21,26 @@ type DatabaseConnectResponse struct {
 	ClientID string `json:"clientID"`
 	Error    string `json:"error"`
 }
+
+type WatchQueryRequest struct {
+	// The client id of the client that requested the watchquery
+	ClientID string `json:"clientID"`
+
+	// The hash of the query to identify the query on the client
+	Hash string `json:"hash"`
+
+	// The name of the collection to watch
+	CollectionName string `json:"collectionName"`
+
+	// The query to watch
+	Query string `json:"query"`
+
+	// The options for the query
+	Options string `json:"options"`
+}
+
+type WatchQueryResponse struct {
+	Status string `json:"status"`
+
+	Error string `json:"error"`
+}
