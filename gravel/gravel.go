@@ -141,17 +141,23 @@ func (gravel *GravelServer) listenToConnects() {
 			NumberOfConnections: 1,
 		}
 
-		updateChannel := make(chan db.DBChangeStreamEvent)
+		updateChannel := make(chan string)
 
 		if shouldStartChangeStream {
-			dbService.Connection.StartChangeStream(updateChannel)
+			go dbService.Connection.StartChangeStream(updateChannel)
 		}
 
 		go func() {
 			for update := range updateChannel {
-				log.Println("Sending update to client", req.ClientID)
-				updateJson, _ := json.Marshal(update)
-				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(updateJson))
+				// log.Println("Sending update to client", req.ClientID)
+				update := db.WatchQueryUpdate{
+					QueryHash: req.Hash,
+					Type:      "patch",
+					Result:    update,
+				}
+				responseData, _ := json.Marshal(update)
+				log.Println("Res", string(responseData))
+				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(responseData))
 			}
 		}()
 

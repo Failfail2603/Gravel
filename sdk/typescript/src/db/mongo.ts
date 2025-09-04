@@ -231,6 +231,8 @@ export async function generateMongoProvider(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
 
+      console.log(response);
+
       // get the queries which should be updated
       const activeSubscriptionsForQuery = activeSubscriptions.get(
         response.queryHash,

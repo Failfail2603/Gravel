@@ -11,7 +11,7 @@ const (
 type DBProvider interface {
 	Connect() error
 	Disconnect() error
-	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
+	StartChangeStream(natsResponseChanneldbUpdates chan string)
 	StopChangeStream()
 }
 

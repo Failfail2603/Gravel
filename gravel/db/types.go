@@ -44,6 +44,14 @@ type WatchQueryStopRequest struct {
 	Hash     string `json:"hash"`
 }
 
+type WatchQueryUpdate struct {
+	QueryHash string `json:"queryHash"`
+
+	Type string `json:"type"`
+
+	Result string `json:"result"`
+}
+
 type WatchQueryResponse struct {
 	Status string `json:"status"`
 

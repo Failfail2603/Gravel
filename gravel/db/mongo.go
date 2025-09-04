@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,7 +79,7 @@ func (m *MongoProvider) Disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) StartChangeStream(dbUpdates chan DBChangeStreamEvent) {
+func (m *MongoProvider) StartChangeStream(dbUpdates chan string) {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot start change stream for %s", m.MongoUrl)
 		return
@@ -136,11 +138,118 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 }
 
 func parseChangeToJSONPatchString(event DBChangeStreamEvent) string {
+	log.Println("Event", event)
+	var patches []map[string]interface{}
 
+	// Convert the document to a map for easier processing
+	docBytes, err := json.Marshal(event.Document)
+	if err != nil {
+		log.Printf("Failed to marshal document: %v", err)
+		return "[]"
+	}
+
+	var docMap map[string]interface{}
+	if err := json.Unmarshal(docBytes, &docMap); err != nil {
+		log.Printf("Failed to unmarshal document: %v", err)
+		return "[]"
+	}
+
+	switch strings.ToLower(event.Operation) {
+	case "insert":
+		// For insert operations, add the entire document
+		if fullDoc, ok := docMap["fullDocument"].(map[string]interface{}); ok {
+			patches = append(patches, map[string]interface{}{
+				"op":    "add",
+				"path":  "",
+				"value": fullDoc,
+			})
+		} else {
+			// If no fullDocument, use the entire document
+			patches = append(patches, map[string]interface{}{
+				"op":    "add",
+				"path":  "",
+				"value": docMap,
+			})
+		}
+
+	case "update":
+		// For update operations, process the updateDescription
+		if updateDesc, ok := docMap["updateDescription"].(map[string]interface{}); ok {
+			// Handle updated fields
+			if updatedFields, ok := updateDesc["updatedFields"].(map[string]interface{}); ok {
+				for field, value := range updatedFields {
+					patches = append(patches, map[string]interface{}{
+						"op":    "replace",
+						"path":  "/" + strings.ReplaceAll(field, ".", "/"),
+						"value": value,
+					})
+				}
+			}
+
+			// Handle removed fields
+			if removedFields, ok := updateDesc["removedFields"].([]interface{}); ok {
+				for _, field := range removedFields {
+					if fieldStr, ok := field.(string); ok {
+						patches = append(patches, map[string]interface{}{
+							"op":   "remove",
+							"path": "/" + strings.ReplaceAll(fieldStr, ".", "/"),
+						})
+					}
+				}
+			}
+
+			// Handle truncated arrays
+			if truncatedArrays, ok := updateDesc["truncatedArrays"].([]interface{}); ok {
+				for _, arrayInfo := range truncatedArrays {
+					if arrayMap, ok := arrayInfo.(map[string]interface{}); ok {
+						if field, ok := arrayMap["field"].(string); ok {
+							if newSize, ok := arrayMap["newSize"].(float64); ok {
+								patches = append(patches, map[string]interface{}{
+									"op":    "replace",
+									"path":  "/" + strings.ReplaceAll(field, ".", "/") + "/length",
+									"value": int(newSize),
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+
+	case "replace":
+		// For replace operations, replace the entire document
+		if fullDoc, ok := docMap["fullDocument"].(map[string]interface{}); ok {
+			patches = append(patches, map[string]interface{}{
+				"op":    "replace",
+				"path":  "",
+				"value": fullDoc,
+			})
+		}
+
+	case "delete":
+		// For delete operations, remove the entire document
+		patches = append(patches, map[string]interface{}{
+			"op":   "remove",
+			"path": "",
+		})
+
+	default:
+		log.Printf("Unknown operation type: %s", event.Operation)
+		return "[]"
+	}
+
+	// Convert patches to JSON string
+	patchBytes, err := json.Marshal(patches)
+	if err != nil {
+		log.Printf("Failed to marshal patches: %v", err)
+		return "[]"
+	}
+
+	return string(patchBytes)
 }
 
 // handleChangeStream processes change stream events
-func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan DBChangeStreamEvent, stopChan chan struct{}) {
+func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan string, stopChan chan struct{}) {
 	// Capture the MongoUrl at the start to avoid accessing it after potential cleanup
 	mongoUrl := m.MongoUrl
 
@@ -182,28 +291,16 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				continue
 			}
 
-			// Extract document (fullDocument for insert/update, documentKey for delete)
-			var document interface{}
-			// prettyJSON, _ := json.MarshalIndent(changeEvent, "\t\t\t", "  ")
-			// log.Printf("Change event: \n%s", prettyJSON)
-			if fullDoc, exists := changeEvent["fullDocument"]; exists {
-				document = fullDoc
-			} else if docKey, exists := changeEvent["updateDescription"]; exists {
-				document = docKey
-			} else {
-				document = changeEvent
-			}
-
 			// Create and send change event
 			event := DBChangeStreamEvent{
 				Database:  mongoUrl,
 				Operation: operation,
-				Document:  document,
+				Document:  changeEvent,
 				Timestamp: time.Now(),
 			}
 
 			select {
-			case dbUpdates <- event:
+			case dbUpdates <- parseChangeToJSONPatchString(event):
 				// log.Printf("Sent change event for %s: %s", mongoUrl, operation)
 			case <-stopChan:
 				log.Printf("Change stream for %s stopped while sending event", mongoUrl)
