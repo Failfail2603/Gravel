@@ -47,7 +47,7 @@ def generate_user_data():
     }
 
 
-def ensure_users_collection(db, target_count=1000):
+def ensure_users_collection(db, target_count):
     """Ensure the users collection has exactly the target number of entries"""
     collection = db.users
 
@@ -83,7 +83,7 @@ def ensure_users_collection(db, target_count=1000):
     print(f"✓ Final user count: {final_count}")
 
 
-def update_random_users_periodically(db, interval_seconds=5):
+def update_random_users_periodically(db, interval_seconds):
     """Periodically update a random number of users every interval_seconds"""
     collection = db.users
 
@@ -172,17 +172,17 @@ def main():
     db = client.gravel_db
     print(f"✓ Using database: gravel_db")
 
-    # Ensure users collection has 1000 entries
-    ensure_users_collection(db, target_count=1000)
+    # Ensure users collection has entries
+    ensure_users_collection(db, 500000)
 
     # Create an index on email for better query performance
     try:
         db.users.create_index("email", unique=True, background=True)
         print("✓ Created unique index on email field")
     except pymongo.errors.DuplicateKeyError:
-        print("! Index on email already exists")
+        print("✓ Index on email already exists")
     except Exception as e:
-        print(f"! Could not create index: {e}")
+        print(f"✗ Could not create index: {e}")
 
     # Display some sample data
     print("\nSample users:")
@@ -192,19 +192,33 @@ def main():
         print(f"{i}. Email: {user['email']}")
         print(f"   Birthday: {user['birthday'].strftime('%Y-%m-%d')}")
         print(f"   Debitor: {user['debitor']}")
+        print(f"   Role: {user['role']}")
         print()
 
     # Ask if user wants to start periodic updates
     print("Options:")
     print("1. Exit script")
-    print("2. Start periodic user updates (every 5 seconds)")
+    print("2. Start periodic user updates")
 
     try:
         choice = input("\nEnter your choice (1-2): ").strip()
 
         if choice == "2":
+            update_interval = input(
+                "\nEnter update interval in milliseconds: ").strip()
+            try:
+                update_interval = int(update_interval)
+                if update_interval <= 0:
+                    print("Error: Interval must be a positive number")
+                    print("Exiting script...")
+                    return
+            except ValueError:
+                print("Error: Please enter a valid number for the interval")
+                print("Exiting script...")
+                return
+
             # Start periodic updates - this will run indefinitely until Ctrl+C
-            update_random_users_periodically(db, interval_seconds=5)
+            update_random_users_periodically(db, update_interval / 1000)
         else:
             print("Exiting script...")
 
