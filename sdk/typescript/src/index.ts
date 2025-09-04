@@ -13,7 +13,7 @@ async function test() {
     mongoUrl: "mongodb://localhost:27017/gravel_db",
   });
 
-  const { initialQuery, changes } = await gravelMongoClient.watchQuery(
+  const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
     { role: "user" },
   );
@@ -23,6 +23,16 @@ async function test() {
   changes.subscribe((change) => {
     console.log(change);
   });
+
+  // Handle Ctrl+C gracefully
+  process.on("SIGINT", async () => {
+    console.log("\nReceived SIGINT (Ctrl+C). Stopping gracefully...");
+    await stop();
+    process.exit(0);
+  });
+
+  // Keep the process running
+  console.log("Watching for changes... Press Ctrl+C to stop.");
 }
 
 void test();

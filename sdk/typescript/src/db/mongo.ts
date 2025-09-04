@@ -1,4 +1,5 @@
 import type { NatsConnection } from "nats";
+import { Subject } from "rxjs";
 import { Observable } from "rxjs/internal/Observable";
 import { v4 as uuidv4 } from "uuid";
 import { GravelDBs } from "../gravel";
@@ -51,8 +52,13 @@ export interface GravelMongoWatchQueryRequest {
   clientID: string;
   hash: string;
   collectionName: string;
-  query: Record<string, any>;
-  options?: GravelMongoWatchQueryFindOptions;
+  query: string;
+  options?: string;
+}
+
+export interface GravelMongoWatchQueryStopRequest {
+  clientID: string;
+  hash: string;
 }
 
 export interface GravelMongoWatchQueryResponse {
@@ -82,6 +88,7 @@ export interface GravelMongoClient extends GravelClient {
   ): Promise<{
     initialQuery: Array<T>;
     changes: Observable<Array<T>>;
+    stop: () => Promise<void>;
   }>;
 }
 
@@ -135,6 +142,16 @@ function hashQuery(
   }
 }
 
+interface GravelMongoSubscription<
+  T extends Record<string, any> = Record<string, any>,
+> {
+  // this id is only used on the client to stop the correct observable. Gravel does not care which observable belongs to which webclient connected. We cannot just end all queries under a hash as gravel does not know which client is connected to which query.
+  clientQueryId: string;
+  initialQuery: Array<T>;
+  changes: Subject<Array<T>>;
+  stop: () => Promise<void>;
+}
+
 export async function generateMongoProvider(
   natsConnection: NatsConnection,
   options: GravelMongoOptions,
@@ -160,6 +177,7 @@ export async function generateMongoProvider(
 
   // the client gets a unique channel per client. Watchqueries are shared on one client and split to the corresponding queries
   const watchQueryChannel = "gravel.mongo.watchquery." + clientID;
+  const watchQueryChannelInitial = "gravel.mongo.initial." + clientID;
 
   // generate the db provider id unique to the connection setting.
   // same connections will result in the same id
@@ -171,10 +189,7 @@ export async function generateMongoProvider(
   // under a specifc query hash there will be all
   const activeSubscriptions = new Map<
     string,
-    Array<{
-      initialQuery: Array<Record<string, any>>;
-      changes: Observable<Array<Record<string, any>>>;
-    }>
+    Array<GravelMongoSubscription<any>>
   >();
 
   // subscribe to the watchquery channel tro recieve updates
@@ -189,11 +204,45 @@ export async function generateMongoProvider(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
 
-      // TODO response has the client id to multiplex to the correct observable
+      // get the queries which should be updated
+      const activeSubscriptionsForQuery = activeSubscriptions.get(
+        response.queryHash,
+      );
 
-      // TODO update the right observable with the message
+      if (!activeSubscriptionsForQuery) {
+        return;
+      }
 
-      console.log(response);
+      for (const subscription of activeSubscriptionsForQuery) {
+        subscription.changes.next(response.result);
+      }
+    },
+  });
+
+  // the channel which recieves the initial query
+  natsConnection.subscribe(watchQueryChannelInitial, {
+    callback(err, msg) {
+      if (err) {
+        console.error(err);
+        return;
+      }
+
+      const response = JSON.parse(
+        msg.data.toString(),
+      ) as GravelMongoWatchQueryResponse;
+
+      // get the queries which should be updated
+      const activeSubscriptionsForQuery = activeSubscriptions.get(
+        response.queryHash,
+      );
+
+      if (!activeSubscriptionsForQuery) {
+        return;
+      }
+
+      for (const subscription of activeSubscriptionsForQuery) {
+        subscription.changes.next(response.result);
+      }
     },
   });
 
@@ -205,15 +254,73 @@ export async function generateMongoProvider(
       collectionName: string,
       query: Record<string, any>,
       options?: GravelMongoWatchQueryFindOptions,
-    ): Promise<{
-      initialQuery: Array<T>;
-      changes: Observable<Array<T>>;
-    }> {
-      const updateObservable = new Observable<Array<T>>();
+    ): Promise<GravelMongoSubscription<T>> {
+      const updateSubject = new Subject<Array<T>>();
 
       // gravel gets a unique channel for every client, which is shared between watchqueries.
       // to differentiate between different watchqueries, we use a hash of the query
       const queryHash = hashQuery(collectionName, query, options);
+
+      // if the query is already active, we return the existing subscription
+      const activeSubscriptionsForQuery = activeSubscriptions.get(queryHash);
+
+      const queryID = uuidv4();
+
+      const subscription = {
+        // we init the subscription with an empty array. Before we return it we need to wait for the inital result from gravel
+        clientQueryId: queryID,
+        initialQuery: [],
+        changes: updateSubject,
+        stop: async () => {
+          console.log(
+            "Stopping watchquery for client",
+            clientID,
+            "and query",
+            queryHash,
+            "with id",
+            queryID,
+          );
+          // updateSubject.complete();
+
+          const subs = activeSubscriptions.get(queryHash);
+
+          // pull out the subscription from the active subscriptions
+          subs?.forEach((subscription) => {
+            if (subscription.clientQueryId === queryID) {
+              subs?.splice(subs.indexOf(subscription), 1);
+            }
+          });
+
+          // send stop request with query hash
+          await natsConnection.request(
+            "gravel.watchquery.stop",
+            JSON.stringify({
+              clientID,
+              hash: queryHash,
+            } satisfies GravelMongoWatchQueryStopRequest),
+            {
+              timeout: 5000,
+              reply: GravelChannels.GravelDebug,
+              noMux: true,
+            },
+          );
+
+          console.log(
+            "Stopped watchquery for client",
+            clientID,
+            "and query",
+            queryHash,
+            "with id",
+            queryID,
+          );
+        },
+      } satisfies GravelMongoSubscription<T>;
+
+      if (activeSubscriptionsForQuery) {
+        activeSubscriptionsForQuery.push(subscription);
+      } else {
+        activeSubscriptions.set(queryHash, [subscription]);
+      }
 
       // call gravel to register the query
       await natsConnection.request(
@@ -232,10 +339,7 @@ export async function generateMongoProvider(
         },
       );
 
-      return {
-        initialQuery: [],
-        changes: updateObservable,
-      };
+      return subscription;
     },
   };
 }

@@ -92,7 +92,7 @@ func (m *MongoProvider) StartChangeStream(dbUpdates chan DBChangeStreamEvent) {
 	}
 
 	// Create change stream options
-	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
+	opts := options.ChangeStream()
 
 	// Start change stream
 	changeStream, err := m.client.Watch(context.Background(), mongo.Pipeline{}, opts)
@@ -135,45 +135,60 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 	}
 }
 
+func parseChangeToJSONPatchString(event DBChangeStreamEvent) string {
+
+}
+
 // handleChangeStream processes change stream events
 func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan DBChangeStreamEvent, stopChan chan struct{}) {
+	// Capture the MongoUrl at the start to avoid accessing it after potential cleanup
+	mongoUrl := m.MongoUrl
+
 	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("Change stream handler for %s panicked: %v", m.MongoUrl, r)
-		}
+		// as we have any async context we need to recover if the channel panics when mongo is closed while executing
+		// should be normal behavior
+		recover()
 	}()
 
 	for {
 		select {
 		case <-stopChan:
-			log.Printf("Change stream for %s stopped", m.MongoUrl)
+			log.Printf("Change stream for %s stopped", mongoUrl)
 			return
 		default:
+			// Check if change stream is still valid before using it
+			if changeStream == nil {
+				log.Printf("Change stream for %s is nil, stopping", mongoUrl)
+				return
+			}
+
 			if !changeStream.Next(context.Background()) {
 				if err := changeStream.Err(); err != nil {
-					log.Printf("Change stream error for %s: %v", m.MongoUrl, err)
+					log.Printf("Change stream error for %s: %v", mongoUrl, err)
 				}
 				return
 			}
 
 			var changeEvent bson.M
 			if err := changeStream.Decode(&changeEvent); err != nil {
-				log.Printf("Failed to decode change event for %s: %v", m.MongoUrl, err)
+				log.Printf("Failed to decode change event for %s: %v", mongoUrl, err)
 				continue
 			}
 
 			// Extract operation type
 			operation, ok := changeEvent["operationType"].(string)
 			if !ok {
-				log.Printf("Invalid operation type in change event for %s", m.MongoUrl)
+				log.Printf("Invalid operation type in change event for %s", mongoUrl)
 				continue
 			}
 
 			// Extract document (fullDocument for insert/update, documentKey for delete)
 			var document interface{}
+			// prettyJSON, _ := json.MarshalIndent(changeEvent, "\t\t\t", "  ")
+			// log.Printf("Change event: \n%s", prettyJSON)
 			if fullDoc, exists := changeEvent["fullDocument"]; exists {
 				document = fullDoc
-			} else if docKey, exists := changeEvent["documentKey"]; exists {
+			} else if docKey, exists := changeEvent["updateDescription"]; exists {
 				document = docKey
 			} else {
 				document = changeEvent
@@ -181,7 +196,7 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 
 			// Create and send change event
 			event := DBChangeStreamEvent{
-				Database:  m.MongoUrl,
+				Database:  mongoUrl,
 				Operation: operation,
 				Document:  document,
 				Timestamp: time.Now(),
@@ -189,12 +204,12 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 
 			select {
 			case dbUpdates <- event:
-				log.Printf("Sent change event for %s: %s", m.MongoUrl, operation)
+				// log.Printf("Sent change event for %s: %s", mongoUrl, operation)
 			case <-stopChan:
-				log.Printf("Change stream for %s stopped while sending event", m.MongoUrl)
+				log.Printf("Change stream for %s stopped while sending event", mongoUrl)
 				return
 			default:
-				log.Printf("Channel blocked, dropping change event for %s", m.MongoUrl)
+				log.Printf("Channel blocked, dropping change event for %s", mongoUrl)
 			}
 		}
 	}

@@ -39,6 +39,11 @@ type WatchQueryRequest struct {
 	Options string `json:"options"`
 }
 
+type WatchQueryStopRequest struct {
+	ClientID string `json:"clientID"`
+	Hash     string `json:"hash"`
+}
+
 type WatchQueryResponse struct {
 	Status string `json:"status"`
 

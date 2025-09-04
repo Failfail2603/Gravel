@@ -159,9 +159,65 @@ func (gravel *GravelServer) listenToConnects() {
 			Status: "success",
 		}
 		responseData, _ := json.Marshal(response)
-		log.Println(response.Error)
+		if response.Error != "" {
+			log.Println(response.Error)
+		}
 		m.Respond(responseData)
 
+	})
+
+	gravel.natsConnection.SubscribeTo("gravel.watchquery.stop", func(m *nats.Msg) {
+		log.Println("Received gravel.watchquery.stop request")
+		var req db.WatchQueryStopRequest
+
+		// check if request is valid and parse it to internal type
+		if err := json.Unmarshal(m.Data, &req); err != nil {
+			response := db.WatchQueryResponse{
+				Status: "error",
+				Error:  err.Error(),
+			}
+			responseData, _ := json.Marshal(response)
+			log.Println(response.Error)
+			m.Respond(responseData)
+			return
+		}
+
+		// check if the watchquery exists
+		watchQuery := gravel.dbServices[req.ClientID].WatchQueries[req.Hash]
+
+		if watchQuery == nil {
+			log.Println("Watchquery not found for client ", req.ClientID, " and hash ", req.Hash)
+			response := db.WatchQueryResponse{
+				Status: "error",
+				Error:  "Watchquery not found for client " + req.ClientID + " and hash " + req.Hash,
+			}
+			responseData, _ := json.Marshal(response)
+			log.Println(response.Error)
+			m.Respond(responseData)
+			return
+		}
+
+		watchQuery.NumberOfConnections--
+
+		// if the connection count is 0 we pull the watchqeuery from the map
+		if watchQuery.NumberOfConnections == 0 {
+			delete(gravel.dbServices[req.ClientID].WatchQueries, req.Hash)
+		}
+
+		if len(gravel.dbServices[req.ClientID].WatchQueries) == 0 {
+			gravel.dbServices[req.ClientID].Connection.StopChangeStream()
+		}
+
+		log.Println("Stopped watchquery for client ", req.ClientID, " and hash ", req.Hash)
+
+		response := db.WatchQueryResponse{
+			Status: "success",
+		}
+		responseData, _ := json.Marshal(response)
+		if response.Error != "" {
+			log.Println(response.Error)
+		}
+		m.Respond(responseData)
 	})
 }
 
