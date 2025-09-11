@@ -38,8 +38,10 @@ export declare type SortDirection =
       readonly $meta: string;
     };
 
+type ProjectionValue = 1 | 0 | { [key: string]: ProjectionValue };
+
 export interface GravelMongoWatchQueryFindOptions {
-  projection?: Record<string, 1 | 0>;
+  projection?: Record<string, ProjectionValue>;
   sort?: Sort;
   skip?: number;
   limit?: number;
@@ -372,13 +374,13 @@ export async function generateMongoProvider(
             resolve(value);
           }
         });
-        
+
         // Also handle completion in case the subject completes without emitting data
         initialSubject.subscribe({
           complete: () => {
             subscription.unsubscribe();
             resolve([]);
-          }
+          },
         });
       });
       console.log("initial query result: ", initialQueryResult);

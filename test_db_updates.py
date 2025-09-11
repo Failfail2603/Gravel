@@ -8,11 +8,13 @@ import pymongo
 from datetime import datetime, timedelta
 import random
 from faker import Faker
+from faker.providers import address
 import sys
 import time
 
 # Initialize Faker for generating realistic data
 fake = Faker()
+fake.add_provider(address)
 
 
 def connect_to_mongodb():
@@ -44,6 +46,13 @@ def generate_user_data():
         "birthday": birthday,
         "debitor": random.randint(1000, 999999),  # Random debitor number
         "role": random.choice(["user", "admin", "moderator"]),
+        "address": {
+            "street": fake.street_address(),
+            "city": fake.city(),
+            "state": fake.state(),
+            "zip": fake.postcode(),
+            "country": fake.country(),
+        },
     }
 
 

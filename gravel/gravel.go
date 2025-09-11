@@ -181,31 +181,59 @@ func (gravel *GravelServer) listenToConnects() {
 		// if the watchqueries are empty we need to start the change stream
 		var shouldStartChangeStream bool = len(dbService.WatchQueries) == 0
 
-		// if no we create a new watchquery and start the change stream
+		queryInformation, err := dbService.Connection.GetDestructuredQueryInformation(req)
+		if err != nil {
+			response := db.DebugMessage{
+				Status: "error",
+				Error:  err.Error(),
+			}
+			responseData, _ := json.Marshal(response)
+			if response.Error != "" {
+				log.Println(response.Error)
+			}
+			m.Respond(responseData)
+			return
+		}
 
-		dbService.WatchQueries[req.Hash] = &db.WatchQuery{
+		// if no we create a new watchquery and start the change stream
+		var newWatchQuery db.WatchQuery = db.WatchQuery{
 			ClientID:            req.ClientID,
 			Hash:                req.Hash,
 			Collection:          req.CollectionName,
 			Query:               req.Query,
 			Options:             req.Options,
 			NumberOfConnections: 1,
+			QueryInformation:    queryInformation,
 		}
 
-		updateChannel := make(chan string)
+		dbService.WatchQueries[req.Hash] = &newWatchQuery
 
 		if shouldStartChangeStream {
-			go dbService.Connection.StartChangeStream(updateChannel)
+			dbService.UpdateChannel = make(chan db.DBChangeStreamEvent)
+			go dbService.Connection.StartChangeStream(dbService.UpdateChannel)
 		}
 
 		go func() {
-			for update := range updateChannel {
+			for update := range dbService.UpdateChannel {
 				// log.Println("Sending update to client", req.ClientID)
+
+				relevant := IsChangeRelevant(&newWatchQuery, &update)
+				log.Println("Got update. Is relevant: ", relevant)
+				// check if the update is relevant for the watchquery
+				if !relevant {
+					continue
+				}
+
+				// convert the update to a string
+				updateString := dbService.Connection.ParseChangeToJSONPatchString(update)
+
+				// send the update to the client
 				update := db.WatchQueryResponse{
 					QueryHash: req.Hash,
 					Type:      "patch",
-					Result:    update,
+					Result:    updateString,
 				}
+
 				responseData, _ := json.Marshal(update)
 				log.Println("Res", string(responseData))
 				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(responseData))

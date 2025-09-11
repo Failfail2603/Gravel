@@ -16,7 +16,11 @@ async function test() {
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
     { role: "user" },
-    { skip: 0, limit: 10 },
+    {
+      skip: 0,
+      limit: 10,
+      projection: { email: 1, address: { street: 1 } },
+    },
   );
 
   console.log(initialQuery);

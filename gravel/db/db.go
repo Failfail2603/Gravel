@@ -8,11 +8,19 @@ const (
 	DBTypeMongoDB string = "mongodb"
 )
 
+type DestructuredQueryInformation struct {
+	ProjectionFields []string
+	FilterFields     []string
+	SortFields       []string
+}
+
 type DBProvider interface {
 	Connect() error
 	Disconnect() error
+	GetDestructuredQueryInformation(query WatchQueryRequest) (DestructuredQueryInformation, error)
 	Query(collection string, query string, findOptions string) []interface{}
-	StartChangeStream(natsResponseChanneldbUpdates chan string)
+	ParseChangeToJSONPatchString(event DBChangeStreamEvent) string
+	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
 	StopChangeStream()
 }
 
@@ -26,10 +34,15 @@ type WatchQuery struct {
 	// we dedube watchqueries by hash, so we need to count the number of connections to the same watchquery
 	// the multiplexing to the different queries observables will be handled by the client
 	NumberOfConnections int
+
+	// these are some analytical fields which get computed at the register of the watchquery.
+	// they hold information which is used later to determine if a change is relevant for the watchquery
+	QueryInformation DestructuredQueryInformation
 }
 
 type DBService struct {
-	Connection DBProvider
+	Connection    DBProvider
+	UpdateChannel chan DBChangeStreamEvent
 
 	/**
 	 * The currently open WatchQueries on the database client

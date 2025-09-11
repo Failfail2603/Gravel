@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -102,27 +104,14 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 		}
 	}
 
-	// Parse find options
-	findOptions := options.Find()
-	if findOptionsStr != "" {
-		var optionsMap map[string]interface{}
-		if err := json.Unmarshal([]byte(findOptionsStr), &optionsMap); err != nil {
-			log.Printf("Failed to parse options string: %v", err)
-		} else {
-			if limit, ok := optionsMap["limit"].(float64); ok {
-				findOptions.SetLimit(int64(limit))
-			}
-			if skip, ok := optionsMap["skip"].(float64); ok {
-				findOptions.SetSkip(int64(skip))
-			}
-			if sort, ok := optionsMap["sort"].(map[string]interface{}); ok {
-				findOptions.SetSort(bson.M(sort))
-			}
-		}
+	findOptions, err := parseFindOptions(findOptionsStr)
+	if err != nil {
+		log.Printf("Failed to parse query string: %v", err)
+		return nil
 	}
 
 	// Execute the query
-	cursor, err := coll.Find(ctx, filter, findOptions)
+	cursor, err := coll.Find(ctx, filter, &findOptions)
 	if err != nil {
 		log.Printf("Failed to execute query: %v", err)
 		return nil
@@ -174,7 +163,7 @@ func (m *MongoProvider) Disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) StartChangeStream(dbUpdates chan string) {
+func (m *MongoProvider) StartChangeStream(dbUpdates chan DBChangeStreamEvent) {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot start change stream for %s", m.MongoUrl)
 		return
@@ -232,7 +221,7 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 	}
 }
 
-func parseChangeToJSONPatchString(event DBChangeStreamEvent) string {
+func (m *MongoProvider) ParseChangeToJSONPatchString(event DBChangeStreamEvent) string {
 	log.Println("Event", event)
 	var patches []map[string]interface{}
 
@@ -344,7 +333,7 @@ func parseChangeToJSONPatchString(event DBChangeStreamEvent) string {
 }
 
 // handleChangeStream processes change stream events
-func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan string, stopChan chan struct{}) {
+func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan DBChangeStreamEvent, stopChan chan struct{}) {
 	// Capture the MongoUrl at the start to avoid accessing it after potential cleanup
 	mongoUrl := m.MongoUrl
 
@@ -386,16 +375,50 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				continue
 			}
 
+			// Extract document ID safely
+			var id string
+			if documentKey, ok := changeEvent["documentKey"].(bson.M); ok {
+				if docID, exists := documentKey["_id"]; exists {
+					// Handle different ID types (ObjectID, string, etc.)
+					switch v := docID.(type) {
+					case string:
+						id = v
+					case primitive.ObjectID:
+						id = v.Hex()
+					default:
+						id = fmt.Sprintf("%v", v)
+					}
+				}
+			}
+
+			// Extract collection safely
+			var collection string
+			if ns, ok := changeEvent["ns"].(bson.M); ok {
+				if coll, exists := ns["coll"]; exists {
+					collection = coll.(string)
+				}
+			}
+
+			if id == "" {
+				log.Printf("Could not extract document ID from change event for %s", mongoUrl)
+				continue
+			}
+
+			test, _ := json.MarshalIndent(changeEvent, "", "  ")
+			log.Println("ChangeEvent", string(test))
+
 			// Create and send change event
 			event := DBChangeStreamEvent{
-				Database:  mongoUrl,
-				Operation: operation,
-				Document:  changeEvent,
-				Timestamp: time.Now(),
+				Database:   mongoUrl,
+				Operation:  operation,
+				ID:         id,
+				Collection: collection,
+				Document:   changeEvent,
+				Timestamp:  time.Now(),
 			}
 
 			select {
-			case dbUpdates <- parseChangeToJSONPatchString(event):
+			case dbUpdates <- event:
 				// log.Printf("Sent change event for %s: %s", mongoUrl, operation)
 			case <-stopChan:
 				log.Printf("Change stream for %s stopped while sending event", mongoUrl)
@@ -405,4 +428,115 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			}
 		}
 	}
+}
+
+func parseFindOptions(findOptionsStr string) (options.FindOptions, error) {
+	findOptions := options.Find()
+	if findOptionsStr != "" {
+		var optionsMap map[string]interface{}
+		if err := json.Unmarshal([]byte(findOptionsStr), &optionsMap); err != nil {
+			log.Printf("Failed to parse options string: %v", err)
+		} else {
+			if limit, ok := optionsMap["limit"].(float64); ok {
+				findOptions.SetLimit(int64(limit))
+			}
+			if skip, ok := optionsMap["skip"].(float64); ok {
+				findOptions.SetSkip(int64(skip))
+			}
+			if projection, ok := optionsMap["projection"].(map[string]interface{}); ok {
+
+				findOptions.SetProjection(projection)
+			}
+			if sort, ok := optionsMap["sort"].(map[string]interface{}); ok {
+				findOptions.SetSort(sort)
+			}
+		}
+	}
+	return *findOptions, nil
+}
+
+// flattenObject converts a projection object to a slice of dot-notated field paths
+func flattenObject(projection interface{}) []string {
+	if projection == nil {
+		return []string{}
+	}
+
+	var fields []string
+
+	switch proj := projection.(type) {
+	case map[string]interface{}:
+		for key, value := range proj {
+			fields = append(fields, flattenObjectRecursive(key, value, "")...)
+		}
+	case bson.M:
+		for key, value := range proj {
+			fields = append(fields, flattenObjectRecursive(key, value, "")...)
+		}
+	}
+
+	return fields
+}
+
+// flattenObjectRecursive recursively flattens nested projection objects
+func flattenObjectRecursive(key string, value interface{}, prefix string) []string {
+	var fields []string
+
+	fullKey := key
+	if prefix != "" {
+		fullKey = prefix + "." + key
+	}
+
+	switch v := value.(type) {
+	case map[string]interface{}:
+		// If it's a nested object, recurse into it
+		for nestedKey, nestedValue := range v {
+			fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
+		}
+	case bson.M:
+		// If it's a nested bson.M, recurse into it
+		for nestedKey, nestedValue := range v {
+			fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
+		}
+	default:
+		// For primitive values (1, 0, true, false), add the field path
+		fields = append(fields, fullKey)
+	}
+
+	return fields
+}
+
+func (m *MongoProvider) GetDestructuredQueryInformation(query WatchQueryRequest) (DestructuredQueryInformation, error) {
+
+	var queryInformation = DestructuredQueryInformation{}
+
+	findOptions, err := parseFindOptions(query.Options)
+	if err != nil {
+		return DestructuredQueryInformation{}, err
+	}
+
+	var filter bson.M
+	if query.Query == "" {
+		filter = bson.M{}
+	} else {
+		if err := json.Unmarshal([]byte(query.Query), &filter); err != nil {
+			log.Printf("Failed to parse query string: %v", err)
+			return DestructuredQueryInformation{}, err
+		}
+	}
+
+	// Extract relevant fields from projection
+	queryInformation.ProjectionFields = flattenObject(findOptions.Projection)
+
+	// add _id if not present so we track it
+	if !slices.Contains(queryInformation.ProjectionFields, "_id") {
+		queryInformation.ProjectionFields = append(queryInformation.ProjectionFields, "_id")
+	}
+
+	// Extract relevant fields from filter
+	queryInformation.FilterFields = flattenObject(filter)
+
+	// Extract relevant fields from sort
+	queryInformation.SortFields = flattenObject(findOptions.Sort)
+
+	return queryInformation, nil
 }

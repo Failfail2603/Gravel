@@ -3,10 +3,12 @@ package db
 import "time"
 
 type DBChangeStreamEvent struct {
-	Database  string      `json:"database"`
-	Operation string      `json:"operation"`
-	Document  interface{} `json:"document"`
-	Timestamp time.Time   `json:"timestamp"`
+	Database   string      `json:"database"`
+	Collection string      `json:"collection"`
+	Operation  string      `json:"operation"`
+	ID         string      `json:"id"`
+	Document   interface{} `json:"document"`
+	Timestamp  time.Time   `json:"timestamp"`
 }
 
 type DatabaseConnectRequest struct {
