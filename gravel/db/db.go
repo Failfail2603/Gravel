@@ -11,6 +11,7 @@ const (
 type DBProvider interface {
 	Connect() error
 	Disconnect() error
+	Query(collection string, query string, findOptions string) []interface{}
 	StartChangeStream(natsResponseChanneldbUpdates chan string)
 	StopChangeStream()
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -20,14 +21,36 @@ type MongoProvider struct {
 	stopChannels  map[string]chan struct{}
 	mu            sync.RWMutex
 	MongoUrl      string
+	DatabaseName  string
+}
+
+// extractDatabaseFromURL extracts the database name from a MongoDB URL
+func extractDatabaseFromURL(mongoURL string) string {
+	parsedURL, err := url.Parse(mongoURL)
+	if err != nil {
+		log.Printf("Failed to parse MongoDB URL: %v", err)
+		return "test" // fallback to default
+	}
+
+	// Remove leading slash and get the database name
+	path := strings.TrimPrefix(parsedURL.Path, "/")
+	if path == "" {
+		return "test" // fallback to default if no database in URL
+	}
+
+	// Handle case where there might be additional path segments
+	parts := strings.Split(path, "/")
+	return parts[0]
 }
 
 // generateMongoProvider creates a new MongoDB provider instance
 func generateMongoProvider(connectionRequest DatabaseConnectRequest) *MongoProvider {
+	dbName := extractDatabaseFromURL(connectionRequest.MongoURL)
 	return &MongoProvider{
 		changeStreams: make(map[string]*mongo.ChangeStream),
 		stopChannels:  make(map[string]chan struct{}),
 		MongoUrl:      connectionRequest.MongoURL,
+		DatabaseName:  dbName,
 	}
 }
 
@@ -52,6 +75,78 @@ func (m *MongoProvider) Connect() error {
 	m.client = client
 	log.Println("Connected to MongoDB successfully")
 	return nil
+}
+
+// Query runs a normal query against the database. Mainly used for initial data loading
+func (m *MongoProvider) Query(collection string, query string, findOptionsStr string) []interface{} {
+	if m.client == nil {
+		log.Printf("MongoDB client not connected, cannot execute query")
+		return nil
+	}
+
+	// Get the collection
+	coll := m.client.Database(m.DatabaseName).Collection(collection)
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Parse query string to bson.M
+	var filter bson.M
+	if query == "" {
+		filter = bson.M{}
+	} else {
+		if err := json.Unmarshal([]byte(query), &filter); err != nil {
+			log.Printf("Failed to parse query string: %v", err)
+			return nil
+		}
+	}
+
+	// Parse find options
+	findOptions := options.Find()
+	if findOptionsStr != "" {
+		var optionsMap map[string]interface{}
+		if err := json.Unmarshal([]byte(findOptionsStr), &optionsMap); err != nil {
+			log.Printf("Failed to parse options string: %v", err)
+		} else {
+			if limit, ok := optionsMap["limit"].(float64); ok {
+				findOptions.SetLimit(int64(limit))
+			}
+			if skip, ok := optionsMap["skip"].(float64); ok {
+				findOptions.SetSkip(int64(skip))
+			}
+			if sort, ok := optionsMap["sort"].(map[string]interface{}); ok {
+				findOptions.SetSort(bson.M(sort))
+			}
+		}
+	}
+
+	// Execute the query
+	cursor, err := coll.Find(ctx, filter, findOptions)
+	if err != nil {
+		log.Printf("Failed to execute query: %v", err)
+		return nil
+	}
+	defer cursor.Close(ctx)
+
+	// Collect results
+	var results []interface{}
+	for cursor.Next(ctx) {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			log.Printf("Failed to decode document: %v", err)
+			continue
+		}
+		results = append(results, doc)
+	}
+
+	if err := cursor.Err(); err != nil {
+		log.Printf("Cursor error: %v", err)
+		return nil
+	}
+
+	log.Printf("Query executed successfully, returned %d documents", len(results))
+	return results
 }
 
 // Disconnect closes the MongoDB connection

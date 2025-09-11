@@ -32,6 +32,48 @@ func generateGravelServer(natsConnection *nats_server.NatsConnection) *GravelSer
 	}
 }
 
+func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryRequest) {
+	// Execute the query using the dbService
+	results := dbService.Connection.Query(req.CollectionName, req.Query, req.Options)
+
+	// Check if query execution failed
+	if results == nil {
+		errorMsg := "Query execution failed for client " + req.ClientID
+		log.Println(errorMsg)
+		gravel.natsConnection.Publish("gravel.debug", errorMsg)
+		return
+	}
+
+	// Marshal the results to JSON
+	resultData, err := json.Marshal(results)
+	if err != nil {
+		errorMsg := "Failed to marshal query results for client " + req.ClientID + ": " + err.Error()
+		log.Println(errorMsg)
+		gravel.natsConnection.Publish("gravel.debug", errorMsg)
+		return
+	}
+
+	response := db.WatchQueryResponse{
+		QueryHash: req.Hash,
+		Type:      "full",
+		Result:    string(resultData),
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		errorMsg := "Failed to marshal query results for client " + req.ClientID + ": " + err.Error()
+		log.Println(errorMsg)
+		gravel.natsConnection.Publish("gravel.debug", errorMsg)
+		return
+	}
+
+	// Publish the results to the initial data channel
+	channelName := "gravel.mongo.initial." + req.ClientID
+	gravel.natsConnection.Publish(channelName, string(responseJSON))
+
+	log.Printf("Query results sent to client %s on channel %s", req.ClientID, channelName)
+}
+
 func (gravel *GravelServer) listenToConnects() {
 	gravel.natsConnection.SubscribeTo("gravel.connect", func(m *nats.Msg) {
 		log.Println("Received gravel.connect request")
@@ -88,12 +130,14 @@ func (gravel *GravelServer) listenToConnects() {
 		// check if request is valid and parse it to internal type
 		//
 		if err := json.Unmarshal(m.Data, &req); err != nil {
-			response := db.WatchQueryResponse{
+			response := db.DebugMessage{
 				Status: "error",
 				Error:  err.Error(),
 			}
 			responseData, _ := json.Marshal(response)
-			log.Println(response.Error)
+			if response.Error != "" {
+				log.Println(response.Error)
+			}
 			m.Respond(responseData)
 			return
 		}
@@ -101,15 +145,20 @@ func (gravel *GravelServer) listenToConnects() {
 		var dbService *db.DBService = gravel.dbServices[req.ClientID]
 
 		if dbService == nil {
-			response := db.WatchQueryResponse{
+			response := db.DebugMessage{
 				Status: "error",
 				Error:  "No database connection found for client " + req.ClientID,
 			}
 			responseData, _ := json.Marshal(response)
-			log.Println(response.Error)
+			if response.Error != "" {
+				log.Println(response.Error)
+			}
 			m.Respond(responseData)
 			return
 		}
+
+		// run the inital query which directly pipes to the client
+		go gravel.runQuery(dbService, req)
 
 		// check if the watchquery already exists with the hash. Different clients can have the same watchquery.
 		// we need to ensure that all unique clients in the
@@ -118,11 +167,13 @@ func (gravel *GravelServer) listenToConnects() {
 		// if yes we just count up the connections count. We do not need to do anything else as gravel already sends updates down the channel
 		if watchQuery != nil {
 			watchQuery.NumberOfConnections++
-			response := db.WatchQueryResponse{
+			response := db.DebugMessage{
 				Status: "success",
 			}
 			responseData, _ := json.Marshal(response)
-			log.Println(response.Error)
+			if response.Error != "" {
+				log.Println(response.Error)
+			}
 			m.Respond(responseData)
 			return
 		}
@@ -150,7 +201,7 @@ func (gravel *GravelServer) listenToConnects() {
 		go func() {
 			for update := range updateChannel {
 				// log.Println("Sending update to client", req.ClientID)
-				update := db.WatchQueryUpdate{
+				update := db.WatchQueryResponse{
 					QueryHash: req.Hash,
 					Type:      "patch",
 					Result:    update,
@@ -161,7 +212,7 @@ func (gravel *GravelServer) listenToConnects() {
 			}
 		}()
 
-		response := db.WatchQueryResponse{
+		response := db.DebugMessage{
 			Status: "success",
 		}
 		responseData, _ := json.Marshal(response)
@@ -178,7 +229,7 @@ func (gravel *GravelServer) listenToConnects() {
 
 		// check if request is valid and parse it to internal type
 		if err := json.Unmarshal(m.Data, &req); err != nil {
-			response := db.WatchQueryResponse{
+			response := db.DebugMessage{
 				Status: "error",
 				Error:  err.Error(),
 			}
@@ -193,7 +244,7 @@ func (gravel *GravelServer) listenToConnects() {
 
 		if watchQuery == nil {
 			log.Println("Watchquery not found for client ", req.ClientID, " and hash ", req.Hash)
-			response := db.WatchQueryResponse{
+			response := db.DebugMessage{
 				Status: "error",
 				Error:  "Watchquery not found for client " + req.ClientID + " and hash " + req.Hash,
 			}
@@ -214,9 +265,9 @@ func (gravel *GravelServer) listenToConnects() {
 			gravel.dbServices[req.ClientID].Connection.StopChangeStream()
 		}
 
-		log.Println("Stopped watchquery for client ", req.ClientID, " and hash ", req.Hash)
+		log.Println("Stopped watchquery for client", req.ClientID, "and hash", req.Hash)
 
-		response := db.WatchQueryResponse{
+		response := db.DebugMessage{
 			Status: "success",
 		}
 		responseData, _ := json.Marshal(response)
