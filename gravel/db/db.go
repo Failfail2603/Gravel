@@ -14,7 +14,6 @@ type DBProvider interface {
 	Disconnect() error
 	GetQueryAnalysis(query WatchQueryRequest) (QueryAnalysis, error)
 	Query(collection string, query string, findOptions string) []interface{}
-	ParseChangeToJSONPatchString(event DBChangeStreamEvent) string
 	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
 	StopChangeStream()
 }

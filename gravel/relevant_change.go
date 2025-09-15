@@ -34,7 +34,7 @@ func isFieldRelevant(fieldPath string, relevantFields []string) bool {
 }
 
 // check if the update got made on any relevant field
-func IsUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
 
 	// if the projection is empty we need to watch the entire document so every change is relevant
 	if len(watchQuery.QueryInformation.ProjectionFields) == 0 {
@@ -115,7 +115,7 @@ func IsUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 	return false
 }
 
-func IsChangeRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+func isChangeRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
 
 	// check operation type
 	// Skip if operation is not one of the supported types
@@ -135,7 +135,7 @@ func IsChangeRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 
 	switch change.Operation {
 	case "update":
-		updateRelevant := IsUpdateRelevant(watchQuery, change)
+		updateRelevant := isUpdateRelevant(watchQuery, change)
 		log.Println("Is \"update\" event. Update relevant? ", updateRelevant)
 		return updateRelevant
 	default:

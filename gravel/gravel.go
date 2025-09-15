@@ -72,7 +72,8 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryR
 	log.Printf("Query results sent to client %s on channel %s", req.ClientID, channelName)
 }
 
-func (gravel *GravelServer) listenToConnects() {
+func (gravel *GravelServer) StartListening() {
+
 	gravel.natsConnection.SubscribeTo("gravel.connect", func(m *nats.Msg) {
 		log.Println("Received gravel.connect request")
 		var req db.DatabaseConnectRequest
@@ -220,7 +221,7 @@ func (gravel *GravelServer) listenToConnects() {
 			for update := range dbService.UpdateChannel {
 				// log.Println("Sending update to client", req.ClientID)
 
-				relevant := IsChangeRelevant(&newWatchQuery, &update)
+				relevant := isChangeRelevant(&newWatchQuery, &update)
 				log.Println("Change is relevant to current watchquery: ", relevant)
 				// check if the update is relevant for the watchquery
 				if !relevant {
@@ -228,7 +229,7 @@ func (gravel *GravelServer) listenToConnects() {
 				}
 
 				// convert the update to a string
-				updateString := dbService.Connection.ParseChangeToJSONPatchString(update)
+				updateString := parseChangeToJSONPatchString(update)
 
 				// send the update to the client
 				update := db.WatchQueryResponse{
@@ -312,10 +313,5 @@ func (gravel *GravelServer) listenToConnects() {
 		}
 		m.Respond(responseData)
 	})
-}
-
-func (gravel *GravelServer) StartListening() {
-
-	gravel.listenToConnects()
 
 }

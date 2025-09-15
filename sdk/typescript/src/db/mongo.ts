@@ -71,7 +71,7 @@ export interface GravelMongoWatchQueryResponse {
   type: "full" | "patch";
 
   // the result. can be a full document or a json patch depending on the type
-  result: Array<Record<string, any>>;
+  result: string;
 }
 
 // #endregion
@@ -251,7 +251,6 @@ export async function generateMongoProvider(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
 
-      // get the queries which should be updated
       const activeSubscriptionsForQuery = activeSubscriptions.get(
         response.queryHash,
       );
@@ -261,7 +260,7 @@ export async function generateMongoProvider(
       }
 
       for (const subscription of activeSubscriptionsForQuery) {
-        subscription.changes.next(response.result);
+        subscription.changes.next(JSON.parse(response.result));
       }
     },
   });
@@ -278,8 +277,6 @@ export async function generateMongoProvider(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
 
-      console.log(response);
-
       // get the queries which should be updated
       const initalWaitingQueries = initalSubscriptions.get(response.queryHash);
 
@@ -288,7 +285,7 @@ export async function generateMongoProvider(
       }
 
       for (const waitingSubject of initalWaitingQueries) {
-        waitingSubject.next(response.result);
+        waitingSubject.next(JSON.parse(response.result));
         waitingSubject.complete();
       }
     },
