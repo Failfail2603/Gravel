@@ -136,7 +136,7 @@ func IsChangeRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 	switch change.Operation {
 	case "update":
 		updateRelevant := IsUpdateRelevant(watchQuery, change)
-		log.Println("Is Update relevant? ", updateRelevant)
+		log.Println("Is \"update\" event. Update relevant? ", updateRelevant)
 		return updateRelevant
 	default:
 	}

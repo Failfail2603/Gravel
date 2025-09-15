@@ -23,6 +23,8 @@ var MONGO_QUERY_KEYWORDS = []string{
 	"$bitsAllClear", "$bitsAllSet", "$bitsAnyClear", "$bitsAnySet",
 	// Geospatial operators
 	"$geoIntersects", "$geoWithin", "$near", "$nearSphere",
+	// regex operators
+	"$regex", "$options",
 }
 
 func isMongoKeyword(keyword string) bool {

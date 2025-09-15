@@ -221,7 +221,7 @@ func (gravel *GravelServer) listenToConnects() {
 				// log.Println("Sending update to client", req.ClientID)
 
 				relevant := IsChangeRelevant(&newWatchQuery, &update)
-				log.Println("Got update. Is relevant: ", relevant)
+				log.Println("Change is relevant to current watchquery: ", relevant)
 				// check if the update is relevant for the watchquery
 				if !relevant {
 					continue
@@ -238,7 +238,6 @@ func (gravel *GravelServer) listenToConnects() {
 				}
 
 				responseData, _ := json.Marshal(update)
-				log.Println("Res", string(responseData))
 				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(responseData))
 			}
 		}()
