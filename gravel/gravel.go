@@ -33,7 +33,7 @@ func generateGravelServer(natsConnection *nats_server.NatsConnection) *GravelSer
 	}
 }
 
-func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryRequest) {
+func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryRequest) (*db.WatchQueryResponse, error) {
 	// Execute the query using the dbService
 	results := dbService.Connection.Query(req.CollectionName, req.Query, req.Options)
 
@@ -43,7 +43,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryR
 		errorMsg := "Failed to marshal query results for client " + req.ClientID + ": " + err.Error()
 		log.Println(errorMsg)
 		gravel.natsConnection.Publish("gravel.debug", errorMsg)
-		return
+		return nil, err
 	}
 
 	// if resultdata is "null" (standard for no documents found and json makes a string)
@@ -62,7 +62,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryR
 		errorMsg := "Failed to marshal query results for client " + req.ClientID + ": " + err.Error()
 		log.Println(errorMsg)
 		gravel.natsConnection.Publish("gravel.debug", errorMsg)
-		return
+		return nil, err
 	}
 
 	// Publish the results to the initial data channel
@@ -70,6 +70,8 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryR
 	gravel.natsConnection.Publish(channelName, string(responseJSON))
 
 	log.Printf("Query results sent to client %s on channel %s", req.ClientID, channelName)
+
+	return &response, nil
 }
 
 func (gravel *GravelServer) StartListening() {
@@ -158,8 +160,22 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
-		// run the inital query which directly pipes to the client
-		go gravel.runQuery(dbService, req)
+		// run the initial query which directly pipes to the client
+		queryResult, err := gravel.runQuery(dbService, req)
+		if err != nil {
+			response := db.DebugMessage{
+				ClientID: req.ClientID,
+				Status:   "error",
+				Error:    "Failed to execute initial query: " + err.Error(),
+			}
+			responseData, _ := json.Marshal(response)
+			log.Println(response.Error)
+			m.Respond(responseData)
+			return
+		}
+
+		// Now you have access to the query result here
+		log.Printf("Query executed successfully for client %s, result type: %s", req.ClientID, queryResult.Type)
 
 		// check if the watchquery already exists with the hash. Different clients can have the same watchquery.
 		// we need to ensure that all unique clients in the
@@ -185,6 +201,7 @@ func (gravel *GravelServer) StartListening() {
 		var shouldStartChangeStream bool = len(dbService.WatchQueries) == 0
 
 		queryInformation, err := dbService.Connection.GetQueryAnalysis(req)
+
 		if err != nil {
 			response := db.DebugMessage{
 				ClientID: req.ClientID,
@@ -199,6 +216,30 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
+		// get the document ids from the query
+		// Extract document IDs from query results
+		var documentIds []string
+		if queryResult != nil && queryResult.Result != "" {
+			var results []map[string]interface{}
+			if err := json.Unmarshal([]byte(queryResult.Result), &results); err != nil {
+				log.Printf("Failed to unmarshal query results to extract document IDs: %v", err)
+			} else {
+				// Extract _id field from each document
+				for _, doc := range results {
+					if id, exists := doc["_id"]; exists {
+						// Convert ObjectID to string if needed
+						if idStr, ok := id.(string); ok {
+							documentIds = append(documentIds, idStr)
+						} else {
+							// Handle ObjectID or other types by converting to string
+							documentIds = append(documentIds, fmt.Sprintf("%v", id))
+						}
+					}
+				}
+				log.Printf("Extracted %d document IDs: %v", len(documentIds), documentIds)
+			}
+		}
+
 		// if no we create a new watchquery and start the change stream
 		var newWatchQuery db.WatchQuery = db.WatchQuery{
 			ClientID:            req.ClientID,
@@ -208,6 +249,7 @@ func (gravel *GravelServer) StartListening() {
 			Options:             req.Options,
 			NumberOfConnections: 1,
 			QueryInformation:    queryInformation,
+			WatchedDocumentIds:  documentIds,
 		}
 
 		dbService.WatchQueries[req.Hash] = &newWatchQuery

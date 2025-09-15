@@ -32,6 +32,9 @@ type WatchQuery struct {
 	// these are some analytical fields which get computed at the register of the watchquery.
 	// they hold information which is used later to determine if a change is relevant for the watchquery
 	QueryInformation QueryAnalysis
+
+	// currently watched document ids
+	WatchedDocumentIds []string
 }
 
 type DBService struct {

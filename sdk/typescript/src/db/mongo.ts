@@ -285,9 +285,11 @@ export async function generateMongoProvider(
       }
 
       for (const waitingSubject of initalWaitingQueries) {
-        waitingSubject.next(JSON.parse(response.result));
-        waitingSubject.complete();
+        const parsedResult = JSON.parse(response.result);
+        waitingSubject.next(parsedResult);
       }
+
+      initalSubscriptions.delete(response.queryHash);
     },
   });
 
@@ -399,18 +401,10 @@ export async function generateMongoProvider(
 
       // wait for inital query return
       const initialQueryResult = await new Promise<Array<any>>((resolve) => {
-        const subscription = initialSubject.subscribe((value) => {
-          if (value.length > 0) {
-            subscription.unsubscribe();
-            resolve(value);
-          }
-        });
-
         // Also handle completion in case the subject completes without emitting data
         initialSubject.subscribe({
-          complete: () => {
-            subscription.unsubscribe();
-            resolve([]);
+          next: (v) => {
+            resolve(v);
           },
         });
       });

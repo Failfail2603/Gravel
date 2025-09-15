@@ -21,7 +21,7 @@ async function test() {
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
     {
-      $and: [{ role: "user" }, { email: /awikjdailjd/i }],
+      $and: [{ role: "user" }, { email: /susan/i }],
     },
     {
       skip: 0,

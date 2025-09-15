@@ -6,8 +6,8 @@ import (
 	"log"
 )
 
-// isFieldRelevant checks if a field path matches any of the relevant fields
-func isFieldRelevant(fieldPath string, relevantFields []string) bool {
+// isSingleFieldInRelevantArray checks if a field path matches any of the relevant fields
+func isSingleFieldInRelevantArray(fieldPath string, relevantFields []string) bool {
 	for _, relevantField := range relevantFields {
 		// Exact match
 		if fieldPath == relevantField {
@@ -33,8 +33,7 @@ func isFieldRelevant(fieldPath string, relevantFields []string) bool {
 	return false
 }
 
-// check if the update got made on any relevant field
-func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
 
 	// if the projection is empty we need to watch the entire document so every change is relevant
 	if len(watchQuery.QueryInformation.ProjectionFields) == 0 {
@@ -80,7 +79,7 @@ func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 	if updatedFields, ok := updateDesc["updatedFields"].(map[string]interface{}); ok {
 		for fieldPath := range updatedFields {
 			log.Println("Updated field: ", fieldPath)
-			if isFieldRelevant(fieldPath, relevantFields) {
+			if isSingleFieldInRelevantArray(fieldPath, relevantFields) {
 				return true
 			}
 		}
@@ -91,7 +90,7 @@ func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 		for _, field := range removedFields {
 			log.Println("Removed field: ", field)
 			if fieldStr, ok := field.(string); ok {
-				if isFieldRelevant(fieldStr, relevantFields) {
+				if isSingleFieldInRelevantArray(fieldStr, relevantFields) {
 					return true
 				}
 			}
@@ -104,7 +103,7 @@ func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 			log.Println("Truncated array: ", arrayInfo)
 			if arrayMap, ok := arrayInfo.(map[string]interface{}); ok {
 				if field, ok := arrayMap["field"].(string); ok {
-					if isFieldRelevant(field, relevantFields) {
+					if isSingleFieldInRelevantArray(field, relevantFields) {
 						return true
 					}
 				}
@@ -113,6 +112,33 @@ func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent)
 	}
 
 	return false
+}
+
+func isDocumentRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+
+	// TODO make this better at the moment we have no window shifting
+	// check if the update is relevant to the watched documents
+	// check the change document id against the currently watched _ids
+	if len(watchQuery.WatchedDocumentIds) == 0 {
+		return false
+	}
+
+	for _, watchedID := range watchQuery.WatchedDocumentIds {
+		if change.ID == watchedID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// check if the update got made on any relevant field
+func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+
+	isFieldChangedRelevant := isFieldRelevant(watchQuery, change)
+	isDocumentRelevant := isDocumentRelevant(watchQuery, change)
+
+	return isFieldChangedRelevant && isDocumentRelevant
 }
 
 func isChangeRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
