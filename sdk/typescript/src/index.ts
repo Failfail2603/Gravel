@@ -4,8 +4,13 @@ import { getGravelConnection, GravelDBs } from "./gravel";
 async function test() {
   const gravel = await getGravelConnection({
     debugChannelCallback: (err: NatsError | null, msg: Msg) => {
-      console.log("Gravel Debug: ", msg.data.toString());
-      console.log("Gravel Error: ", err);
+      console.log(
+        "Gravel Debug: ",
+        JSON.stringify(JSON.parse(msg.data.toString()), null, 2),
+      );
+      if (err) {
+        console.log("\x1b[31mGravel Error: ", err, "\x1b[0m");
+      }
     },
   });
   const gravelMongoClient = await gravel.getDatabaseClient({
@@ -15,10 +20,12 @@ async function test() {
 
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
-    { role: "user" },
+    {
+      $and: [{ role: "user" }, { email: /awikjdailjd/i }],
+    },
     {
       skip: 0,
-      limit: 10,
+      limit: 3,
       projection: { email: 1, address: { street: 1 } },
     },
   );

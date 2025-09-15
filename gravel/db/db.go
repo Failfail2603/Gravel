@@ -2,17 +2,12 @@ package db
 
 import (
 	"fmt"
+	"gravel/db/mongo"
 )
 
 const (
 	DBTypeMongoDB string = "mongodb"
 )
-
-type QueryAnalysis struct {
-	ProjectionFields []string
-	FilterFields     []string
-	SortFields       []string
-}
 
 type DBProvider interface {
 	Connect() error
@@ -63,10 +58,16 @@ func newDBService(service DBProvider) (*DBService, error) {
 func StartDBConnection(connectionRequest DatabaseConnectRequest) (*DBService, error) {
 	switch connectionRequest.DBType {
 	case DBTypeMongoDB:
-		return newDBService(generateMongoProvider(connectionRequest))
+		return newDBService(NewMongoProvider(connectionRequest.MongoURL))
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", connectionRequest.DBType)
 	}
+}
+
+// NewMongoProvider creates a new MongoDB provider - this is a factory function
+// that avoids cyclic imports by being defined in the db package
+func NewMongoProvider(mongoURL string) DBProvider {
+	return mongo.NewMongoProvider(mongoURL)
 }
 
 // as different dbs can be supported and the als hear to the same request we need to have different identifiers for each db type in the dbServices map

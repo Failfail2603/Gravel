@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"gravel/db"
+	"gravel/db/shared"
 	"log"
 	"net/url"
 	"slices"
@@ -46,13 +46,13 @@ func extractDatabaseFromURL(mongoURL string) string {
 	return parts[0]
 }
 
-// generateMongoProvider creates a new MongoDB provider instance
-func generateMongoProvider(connectionRequest db.DatabaseConnectRequest) *MongoProvider {
-	dbName := extractDatabaseFromURL(connectionRequest.MongoURL)
+// NewMongoProvider creates a new MongoDB provider instance
+func NewMongoProvider(mongoURL string) *MongoProvider {
+	dbName := extractDatabaseFromURL(mongoURL)
 	return &MongoProvider{
 		changeStreams: make(map[string]*mongo.ChangeStream),
 		stopChannels:  make(map[string]chan struct{}),
-		MongoUrl:      connectionRequest.MongoURL,
+		MongoUrl:      mongoURL,
 		DatabaseName:  dbName,
 	}
 }
@@ -164,7 +164,7 @@ func (m *MongoProvider) Disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) StartChangeStream(dbUpdates chan db.DBChangeStreamEvent) {
+func (m *MongoProvider) StartChangeStream(dbUpdates chan shared.DBChangeStreamEvent) {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot start change stream for %s", m.MongoUrl)
 		return
@@ -222,7 +222,7 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 	}
 }
 
-func (m *MongoProvider) ParseChangeToJSONPatchString(event db.DBChangeStreamEvent) string {
+func (m *MongoProvider) ParseChangeToJSONPatchString(event shared.DBChangeStreamEvent) string {
 	log.Println("Event", event)
 	var patches []map[string]interface{}
 
@@ -334,7 +334,7 @@ func (m *MongoProvider) ParseChangeToJSONPatchString(event db.DBChangeStreamEven
 }
 
 // handleChangeStream processes change stream events
-func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan db.DBChangeStreamEvent, stopChan chan struct{}) {
+func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan shared.DBChangeStreamEvent, stopChan chan struct{}) {
 	// Capture the MongoUrl at the start to avoid accessing it after potential cleanup
 	mongoUrl := m.MongoUrl
 
@@ -409,7 +409,7 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			log.Println("ChangeEvent", string(test))
 
 			// Create and send change event
-			event := db.DBChangeStreamEvent{
+			event := shared.DBChangeStreamEvent{
 				Database:   mongoUrl,
 				Operation:  operation,
 				ID:         id,
@@ -432,16 +432,16 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 }
 
 // Destructures a query into its component parts and analyzes it to get all relevant information to watch it probably
-func (m *MongoProvider) GetDestructuredQueryInformation(query db.WatchQueryRequest) (db.QueryAnalysis, error) {
+func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest) (shared.QueryAnalysis, error) {
 
-	var queryInformation = db.QueryAnalysis{}
+	var queryInformation = shared.QueryAnalysis{}
 
 	// ======== analyze projections ========
 
 	// parse the find options to retrieve the projection as an object
 	findOptions, err := parseFindOptionsString(query.Options)
 	if err != nil {
-		return db.QueryAnalysis{}, err
+		return shared.QueryAnalysis{}, err
 	}
 
 	// Extract relevant fields from projection. which should be every key existing in the projection
@@ -457,13 +457,13 @@ func (m *MongoProvider) GetDestructuredQueryInformation(query db.WatchQueryReque
 	// parse the query string to retrieve the filter as an object
 	queryObject, err := parseQueryString(query.Query)
 	if err != nil {
-		return db.QueryAnalysis{}, err
+		return shared.QueryAnalysis{}, err
 	}
 
 	// Extract relevant fields from query
 	queryInformation.FilterFields, err = getRelevantFieldsFromQueryObject(queryObject)
 	if err != nil {
-		return db.QueryAnalysis{}, err
+		return shared.QueryAnalysis{}, err
 	}
 
 	// ======== analyze sort ========

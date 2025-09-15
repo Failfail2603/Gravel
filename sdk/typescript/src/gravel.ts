@@ -66,34 +66,20 @@ const databaseClients: Map<string, GravelClient> = new Map();
  * @param options - Optional options for the connection
  * @returns A Promise that resolves to a NatsConnection
  */
-async function connectToGravel(
-  options?: GravelConnectOptions,
-): Promise<NatsConnection> {
+async function connectToGravel(): Promise<NatsConnection> {
   const natsConnection = await connect();
-  console.log("Connected to Gravel");
-
-  const debugCallback =
-    options?.debugChannelCallback ??
-    ((err: NatsError | null, _: Msg) => {
-      if (err) console.error("Gravel Error: ", err);
-    });
-
-  const debugSubscription = natsConnection.subscribe(
-    GravelChannels.GravelDebug,
-  );
-  debugSubscription.callback = debugCallback;
 
   return natsConnection;
 }
 
 export async function getGravelConnection(
-  options?: GravelConnectOptions,
+  gravelOptions?: GravelConnectOptions,
 ): Promise<Gravel> {
   if (gravelInstance) {
     return gravelInstance;
   }
 
-  const natsConnection = await connectToGravel(options);
+  const natsConnection = await connectToGravel();
 
   gravelInstance = {
     getDatabaseClient: <T extends GravelDBs>(
@@ -138,6 +124,16 @@ export async function getGravelConnection(
           reject(
             new Error(`Failed to create database client for ${options.db}`),
           );
+        }
+
+        // if the developer specifies a debug callback we subscribe to the debug channel and forward the messages to the callback
+        if (gravelOptions?.debugChannelCallback) {
+          existingClient.debugCallback = gravelOptions?.debugChannelCallback;
+
+          const debugSubscription = natsConnection.subscribe(
+            GravelChannels.GravelDebug + "." + existingClient.clientID,
+          );
+          debugSubscription.callback = gravelOptions?.debugChannelCallback;
         }
 
         databaseClients.set(existingClient.dbProviderID, existingClient);

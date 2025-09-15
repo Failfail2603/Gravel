@@ -211,7 +211,7 @@ export async function generateMongoProvider(
     } as GravelDatabaseConnectRequest),
     {
       timeout: 5000,
-      reply: GravelChannels.GravelDebug,
+      reply: GravelChannels.GravelDebug + "." + clientID,
       noMux: true,
     },
   );
@@ -277,6 +277,8 @@ export async function generateMongoProvider(
       const response = JSON.parse(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
+
+      console.log(response);
 
       // get the queries which should be updated
       const initalWaitingQueries = initalSubscriptions.get(response.queryHash);
@@ -346,7 +348,7 @@ export async function generateMongoProvider(
             } satisfies GravelMongoWatchQueryStopRequest),
             {
               timeout: 5000,
-              reply: GravelChannels.GravelDebug,
+              reply: GravelChannels.GravelDebug + "." + clientID,
               noMux: true,
             },
           );
@@ -393,7 +395,7 @@ export async function generateMongoProvider(
         } satisfies GravelMongoWatchQueryRequest),
         {
           timeout: 5000,
-          reply: GravelChannels.GravelDebug,
+          reply: GravelChannels.GravelDebug + "." + clientID,
           noMux: true,
         },
       );

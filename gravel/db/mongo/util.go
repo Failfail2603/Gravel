@@ -1,16 +1,22 @@
 package mongo
 
-import "go.mongodb.org/mongo-driver/bson"
+import (
+	"log"
+
+	"go.mongodb.org/mongo-driver/bson"
+)
 
 // flattenObject converts a projection object to a slice of dot-notated field paths
-func flattenObject(projection interface{}) []string {
-	if projection == nil {
+func flattenObject(object interface{}) []string {
+	if object == nil {
 		return []string{}
 	}
 
 	var fields []string
 
-	switch proj := projection.(type) {
+	log.Printf("%+q", object)
+
+	switch proj := object.(type) {
 	case map[string]interface{}:
 		for key, value := range proj {
 			fields = append(fields, flattenObjectRecursive(key, value, "")...)
@@ -35,14 +41,24 @@ func flattenObjectRecursive(key string, value interface{}, prefix string) []stri
 
 	switch v := value.(type) {
 	case map[string]interface{}:
-		// If it's a nested object, recurse into it
-		for nestedKey, nestedValue := range v {
-			fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
+		// If it's an empty object, just add the key
+		if len(v) == 0 {
+			fields = append(fields, fullKey)
+		} else {
+			// If it's a nested object, recurse into it
+			for nestedKey, nestedValue := range v {
+				fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
+			}
 		}
 	case bson.M:
-		// If it's a nested bson.M, recurse into it
-		for nestedKey, nestedValue := range v {
-			fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
+		// If it's an empty bson.M, just add the key
+		if len(v) == 0 {
+			fields = append(fields, fullKey)
+		} else {
+			// If it's a nested bson.M, recurse into it
+			for nestedKey, nestedValue := range v {
+				fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
+			}
 		}
 	case []interface{}:
 		// If it's an array, check each element

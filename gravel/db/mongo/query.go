@@ -25,6 +25,15 @@ var MONGO_QUERY_KEYWORDS = []string{
 	"$geoIntersects", "$geoWithin", "$near", "$nearSphere",
 }
 
+func isMongoKeyword(keyword string) bool {
+	for _, k := range MONGO_QUERY_KEYWORDS {
+		if k == keyword {
+			return true
+		}
+	}
+	return false
+}
+
 func parseQueryString(queryString string) (bson.M, error) {
 	var filter bson.M
 	if queryString == "" {
@@ -42,22 +51,41 @@ func getRelevantFieldsFromQueryObject(queryObject bson.M) ([]string, error) {
 	// Extract relevant fields from filter
 	filterFields := flattenObject(queryObject)
 
+	log.Printf("%+q", filterFields)
+
 	// as a query can consist of multiple conditions and mongo specific keywords we need to remove the $ keywords from the fields as they are not relevant for the watchquery
-	// Filter out MongoDB query keywords from filter fields
+	// Extract actual field names by removing MongoDB query keywords from field paths
 	var cleanedFields []string
+	fieldSet := make(map[string]bool) // Use a set to avoid duplicates
+
 	for _, field := range filterFields {
-		isKeyword := false
-		for _, keyword := range MONGO_QUERY_KEYWORDS {
-			if strings.Contains(field, keyword) {
-				isKeyword = true
-				break
+		// Split the field path by dots to process each segment
+		segments := strings.Split(field, ".")
+		var cleanedSegments []string
+
+		for _, segment := range segments {
+			// Check if this segment is a MongoDB keyword. If it is, skip it
+			if isMongoKeyword(segment) {
+				continue
 			}
+
+			// Only keep non-keyword segments
+			cleanedSegments = append(cleanedSegments, segment)
 		}
-		if !isKeyword {
-			cleanedFields = append(cleanedFields, field)
+
+		// If we have any non-keyword segments, join them back and add to result
+		if len(cleanedSegments) > 0 {
+			cleanedField := strings.Join(cleanedSegments, ".")
+			if !fieldSet[cleanedField] {
+				fieldSet[cleanedField] = true
+				cleanedFields = append(cleanedFields, cleanedField)
+			}
 		}
 	}
 	filterFields = cleanedFields
+
+	// Print extracted filter fields for debugging
+	log.Printf("%+q", filterFields)
 
 	return filterFields, nil
 }
