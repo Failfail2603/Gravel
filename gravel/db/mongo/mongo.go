@@ -1,9 +1,10 @@
-package db
+package mongo
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gravel/db"
 	"log"
 	"net/url"
 	"slices"
@@ -46,7 +47,7 @@ func extractDatabaseFromURL(mongoURL string) string {
 }
 
 // generateMongoProvider creates a new MongoDB provider instance
-func generateMongoProvider(connectionRequest DatabaseConnectRequest) *MongoProvider {
+func generateMongoProvider(connectionRequest db.DatabaseConnectRequest) *MongoProvider {
 	dbName := extractDatabaseFromURL(connectionRequest.MongoURL)
 	return &MongoProvider{
 		changeStreams: make(map[string]*mongo.ChangeStream),
@@ -104,7 +105,7 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 		}
 	}
 
-	findOptions, err := parseFindOptions(findOptionsStr)
+	findOptions, err := parseFindOptionsString(findOptionsStr)
 	if err != nil {
 		log.Printf("Failed to parse query string: %v", err)
 		return nil
@@ -163,7 +164,7 @@ func (m *MongoProvider) Disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) StartChangeStream(dbUpdates chan DBChangeStreamEvent) {
+func (m *MongoProvider) StartChangeStream(dbUpdates chan db.DBChangeStreamEvent) {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot start change stream for %s", m.MongoUrl)
 		return
@@ -221,7 +222,7 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 	}
 }
 
-func (m *MongoProvider) ParseChangeToJSONPatchString(event DBChangeStreamEvent) string {
+func (m *MongoProvider) ParseChangeToJSONPatchString(event db.DBChangeStreamEvent) string {
 	log.Println("Event", event)
 	var patches []map[string]interface{}
 
@@ -333,7 +334,7 @@ func (m *MongoProvider) ParseChangeToJSONPatchString(event DBChangeStreamEvent) 
 }
 
 // handleChangeStream processes change stream events
-func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan DBChangeStreamEvent, stopChan chan struct{}) {
+func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan db.DBChangeStreamEvent, stopChan chan struct{}) {
 	// Capture the MongoUrl at the start to avoid accessing it after potential cleanup
 	mongoUrl := m.MongoUrl
 
@@ -408,7 +409,7 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			log.Println("ChangeEvent", string(test))
 
 			// Create and send change event
-			event := DBChangeStreamEvent{
+			event := db.DBChangeStreamEvent{
 				Database:   mongoUrl,
 				Operation:  operation,
 				ID:         id,
@@ -430,113 +431,50 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 	}
 }
 
-func parseFindOptions(findOptionsStr string) (options.FindOptions, error) {
-	findOptions := options.Find()
-	if findOptionsStr != "" {
-		var optionsMap map[string]interface{}
-		if err := json.Unmarshal([]byte(findOptionsStr), &optionsMap); err != nil {
-			log.Printf("Failed to parse options string: %v", err)
-		} else {
-			if limit, ok := optionsMap["limit"].(float64); ok {
-				findOptions.SetLimit(int64(limit))
-			}
-			if skip, ok := optionsMap["skip"].(float64); ok {
-				findOptions.SetSkip(int64(skip))
-			}
-			if projection, ok := optionsMap["projection"].(map[string]interface{}); ok {
+// Destructures a query into its component parts and analyzes it to get all relevant information to watch it probably
+func (m *MongoProvider) GetDestructuredQueryInformation(query db.WatchQueryRequest) (db.QueryAnalysis, error) {
 
-				findOptions.SetProjection(projection)
-			}
-			if sort, ok := optionsMap["sort"].(map[string]interface{}); ok {
-				findOptions.SetSort(sort)
-			}
-		}
-	}
-	return *findOptions, nil
-}
+	var queryInformation = db.QueryAnalysis{}
 
-// flattenObject converts a projection object to a slice of dot-notated field paths
-func flattenObject(projection interface{}) []string {
-	if projection == nil {
-		return []string{}
-	}
+	// ======== analyze projections ========
 
-	var fields []string
-
-	switch proj := projection.(type) {
-	case map[string]interface{}:
-		for key, value := range proj {
-			fields = append(fields, flattenObjectRecursive(key, value, "")...)
-		}
-	case bson.M:
-		for key, value := range proj {
-			fields = append(fields, flattenObjectRecursive(key, value, "")...)
-		}
-	}
-
-	return fields
-}
-
-// flattenObjectRecursive recursively flattens nested projection objects
-func flattenObjectRecursive(key string, value interface{}, prefix string) []string {
-	var fields []string
-
-	fullKey := key
-	if prefix != "" {
-		fullKey = prefix + "." + key
-	}
-
-	switch v := value.(type) {
-	case map[string]interface{}:
-		// If it's a nested object, recurse into it
-		for nestedKey, nestedValue := range v {
-			fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
-		}
-	case bson.M:
-		// If it's a nested bson.M, recurse into it
-		for nestedKey, nestedValue := range v {
-			fields = append(fields, flattenObjectRecursive(nestedKey, nestedValue, fullKey)...)
-		}
-	default:
-		// For primitive values (1, 0, true, false), add the field path
-		fields = append(fields, fullKey)
-	}
-
-	return fields
-}
-
-func (m *MongoProvider) GetDestructuredQueryInformation(query WatchQueryRequest) (DestructuredQueryInformation, error) {
-
-	var queryInformation = DestructuredQueryInformation{}
-
-	findOptions, err := parseFindOptions(query.Options)
+	// parse the find options to retrieve the projection as an object
+	findOptions, err := parseFindOptionsString(query.Options)
 	if err != nil {
-		return DestructuredQueryInformation{}, err
+		return db.QueryAnalysis{}, err
 	}
 
-	var filter bson.M
-	if query.Query == "" {
-		filter = bson.M{}
-	} else {
-		if err := json.Unmarshal([]byte(query.Query), &filter); err != nil {
-			log.Printf("Failed to parse query string: %v", err)
-			return DestructuredQueryInformation{}, err
-		}
-	}
-
-	// Extract relevant fields from projection
+	// Extract relevant fields from projection. which should be every key existing in the projection
 	queryInformation.ProjectionFields = flattenObject(findOptions.Projection)
 
-	// add _id if not present so we track it
+	// add _id if not present so we track it. _id is always present in the returning data regardless of projection. we mimic this behavior here
 	if !slices.Contains(queryInformation.ProjectionFields, "_id") {
 		queryInformation.ProjectionFields = append(queryInformation.ProjectionFields, "_id")
 	}
 
-	// Extract relevant fields from filter
-	queryInformation.FilterFields = flattenObject(filter)
+	// ======== analyze query ========
 
-	// Extract relevant fields from sort
+	// parse the query string to retrieve the filter as an object
+	queryObject, err := parseQueryString(query.Query)
+	if err != nil {
+		return db.QueryAnalysis{}, err
+	}
+
+	// Extract relevant fields from query
+	queryInformation.FilterFields, err = getRelevantFieldsFromQueryObject(queryObject)
+	if err != nil {
+		return db.QueryAnalysis{}, err
+	}
+
+	// ======== analyze sort ========
+
+	// Extract relevant fields from sort. we only need the keys here as sorting order is not relevant in this case
 	queryInformation.SortFields = flattenObject(findOptions.Sort)
+
+	// if no sort is given mongo will sort by _id, by default.
+	if len(queryInformation.SortFields) == 0 {
+		queryInformation.SortFields = append(queryInformation.SortFields, "_id")
+	}
 
 	return queryInformation, nil
 }

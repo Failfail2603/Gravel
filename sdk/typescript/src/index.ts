@@ -23,7 +23,7 @@ async function test() {
     },
   );
 
-  console.log(initialQuery);
+  console.log(JSON.stringify(initialQuery, null, 2));
 
   changes.subscribe((change) => {
     console.log(change);

@@ -8,7 +8,7 @@ const (
 	DBTypeMongoDB string = "mongodb"
 )
 
-type DestructuredQueryInformation struct {
+type QueryAnalysis struct {
 	ProjectionFields []string
 	FilterFields     []string
 	SortFields       []string
@@ -17,7 +17,7 @@ type DestructuredQueryInformation struct {
 type DBProvider interface {
 	Connect() error
 	Disconnect() error
-	GetDestructuredQueryInformation(query WatchQueryRequest) (DestructuredQueryInformation, error)
+	GetQueryAnalysis(query WatchQueryRequest) (QueryAnalysis, error)
 	Query(collection string, query string, findOptions string) []interface{}
 	ParseChangeToJSONPatchString(event DBChangeStreamEvent) string
 	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
@@ -37,7 +37,7 @@ type WatchQuery struct {
 
 	// these are some analytical fields which get computed at the register of the watchquery.
 	// they hold information which is used later to determine if a change is relevant for the watchquery
-	QueryInformation DestructuredQueryInformation
+	QueryInformation QueryAnalysis
 }
 
 type DBService struct {
