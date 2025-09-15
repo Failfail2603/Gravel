@@ -95,6 +95,39 @@ export interface GravelMongoClient extends GravelClient {
 }
 
 /**
+ * Preprocesses a query object to convert JavaScript RegExp objects to MongoDB $regex syntax.
+ * This ensures that regex patterns are properly serialized when stringifying the query.
+ *
+ * @param obj - The query object to preprocess
+ * @returns A new object with RegExp objects converted to MongoDB $regex syntax
+ * @internal
+ */
+function preprocessRegexInQuery(obj: any): any {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (obj instanceof RegExp) {
+    // Convert RegExp to MongoDB $regex syntax
+    return {
+      $regex: obj.source,
+      $options: obj.flags,
+    };
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => preprocessRegexInQuery(item));
+  }
+
+  // Handle regular objects
+  const result: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = preprocessRegexInQuery(value);
+  }
+  return result;
+}
+
+/**
  * Creates a deterministic 16-character hash for MongoDB queries using djb2 algorithm.
  * Used for query deduplication and subscription multiplexing.
  *
@@ -109,8 +142,14 @@ function hashQuery(
   query: Record<string, any>,
   options?: GravelMongoWatchQueryFindOptions,
 ): string {
+  // Preprocess the query to handle regex patterns before hashing
+  const preprocessedQuery = preprocessRegexInQuery(query);
+
   // Create a deterministic string representation by sorting object keys
-  const sortedQuery = JSON.stringify(query, Object.keys(query).sort());
+  const sortedQuery = JSON.stringify(
+    preprocessedQuery,
+    Object.keys(preprocessedQuery).sort(),
+  );
   const sortedOptions = JSON.stringify(
     options || {},
     Object.keys(options || {}).sort(),
@@ -227,8 +266,6 @@ export async function generateMongoProvider(
     },
   });
 
-  console.log("Inital watchquery channel: " + watchQueryChannelInitial);
-
   // the channel which recieves the initial query
   natsConnection.subscribe(watchQueryChannelInitial, {
     callback(err, msg) {
@@ -240,11 +277,6 @@ export async function generateMongoProvider(
       const response = JSON.parse(
         msg.data.toString(),
       ) as GravelMongoWatchQueryResponse;
-
-      console.log(
-        "Received initial watchquery response: " +
-          JSON.stringify(response, null, 2),
-      );
 
       // get the queries which should be updated
       const initalWaitingQueries = initalSubscriptions.get(response.queryHash);
@@ -356,7 +388,7 @@ export async function generateMongoProvider(
           clientID,
           hash: queryHash,
           collectionName,
-          query: JSON.stringify(query),
+          query: JSON.stringify(preprocessRegexInQuery(query)),
           options: JSON.stringify(options),
         } satisfies GravelMongoWatchQueryRequest),
         {
@@ -383,7 +415,6 @@ export async function generateMongoProvider(
           },
         });
       });
-      console.log("initial query result: ", initialQueryResult);
       subscription.initialQuery = initialQueryResult;
 
       return subscription;
