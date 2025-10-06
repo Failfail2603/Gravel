@@ -271,7 +271,7 @@ func (gravel *GravelServer) StartListening() {
 				}
 
 				// convert the update to a string
-				updateString := parseChangeToJSONPatchString(update)
+				updateString := parseChangeToJSONPatchString(&newWatchQuery, &update)
 
 				// send the update to the client
 				update := db.WatchQueryResponse{

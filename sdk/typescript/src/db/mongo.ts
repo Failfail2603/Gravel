@@ -188,7 +188,7 @@ interface GravelMongoSubscription<
 > {
   // this id is only used on the client to stop the correct observable. Gravel does not care which observable belongs to which webclient connected. We cannot just end all queries under a hash as gravel does not know which client is connected to which query.
   clientQueryId: string;
-  initialQuery: Array<T>;
+  initialQuery: { result: Array<T> };
   changes: Subject<Array<T>>;
   stop: () => Promise<void>;
 }
@@ -236,7 +236,7 @@ export async function generateMongoProvider(
   // the subject to push inital query results to. Is a relativly temporary map as it just hold the references to queries which await the inital data
   const initalSubscriptions = new Map<
     string,
-    Array<BehaviorSubject<Array<any>>>
+    Array<BehaviorSubject<{ result: Array<any> }>>
   >();
 
   // subscribe to the watchquery channel tro recieve updates
@@ -286,7 +286,7 @@ export async function generateMongoProvider(
 
       for (const waitingSubject of initalWaitingQueries) {
         const parsedResult = JSON.parse(response.result);
-        waitingSubject.next(parsedResult);
+        waitingSubject.next({ result: parsedResult });
       }
 
       initalSubscriptions.delete(response.queryHash);
@@ -316,7 +316,7 @@ export async function generateMongoProvider(
       const subscription = {
         // we init the subscription with an empty array. Before we return it we need to wait for the inital result from gravel
         clientQueryId: queryID,
-        initialQuery: [] as T[],
+        initialQuery: { result: [] as T[] },
         changes: updateSubject,
         stop: async () => {
           console.log(
@@ -371,7 +371,9 @@ export async function generateMongoProvider(
       }
 
       // the subject which waits for the inital query to return
-      const initialSubject = new BehaviorSubject<Array<any>>([]);
+      const initialSubject = new BehaviorSubject<{ result: Array<T> }>({
+        result: [],
+      });
 
       // register the subject as a waiting inital query
       const otherWaitingInitalSubscriptions =
@@ -400,14 +402,16 @@ export async function generateMongoProvider(
       );
 
       // wait for inital query return
-      const initialQueryResult = await new Promise<Array<any>>((resolve) => {
-        // Also handle completion in case the subject completes without emitting data
-        initialSubject.subscribe({
-          next: (v) => {
-            resolve(v);
-          },
-        });
-      });
+      const initialQueryResult = await new Promise<{ result: Array<T> }>(
+        (resolve) => {
+          // Also handle completion in case the subject completes without emitting data
+          initialSubject.subscribe({
+            next: (v) => {
+              resolve(v);
+            },
+          });
+        },
+      );
       subscription.initialQuery = initialQueryResult;
 
       return subscription;

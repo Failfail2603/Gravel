@@ -25,7 +25,7 @@ async function test() {
     },
     {
       skip: 0,
-      limit: 3,
+      limit: 20,
       projection: { email: 1, address: { street: 1 } },
     },
   );
