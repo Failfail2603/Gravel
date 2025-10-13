@@ -321,7 +321,7 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 }
 
 // Destructures a query into its component parts and analyzes it to get all relevant information to watch it probably
-func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest) (shared.QueryAnalysis, error) {
+func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest, queryResult *shared.WatchQueryResponse, documentIds []string) (shared.QueryAnalysis, error) {
 
 	var queryInformation = shared.QueryAnalysis{}
 
@@ -364,6 +364,11 @@ func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest) (shared
 	if len(queryInformation.SortFields) == 0 {
 		queryInformation.SortFields = append(queryInformation.SortFields, "_id")
 	}
+
+	// ======== analyze window ========
+	queryInformation.WindowStart = int(*findOptions.Skip)
+	queryInformation.WindowEnd = queryInformation.WindowStart + int(*findOptions.Limit)
+	queryInformation.WindowLimit = int(*findOptions.Limit)
 
 	return queryInformation, nil
 }

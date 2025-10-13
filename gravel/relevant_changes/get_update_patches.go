@@ -1,4 +1,4 @@
-package main
+package relevant_changes
 
 import (
 	"encoding/json"
@@ -33,12 +33,12 @@ func isSingleFieldInRelevantArray(fieldPath string, relevantFields []string) boo
 	return false
 }
 
-func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) (bool, bool) {
 
 	// if the projection is empty we need to watch the entire document so every change is relevant
 	if len(watchQuery.QueryInformation.ProjectionFields) == 0 {
 		log.Println("Projection is empty. Watching entire document. Every change is relevant")
-		return true
+		return true, true
 	}
 
 	// relevant fields are all fields that are projected, sorted and filtered. If any of these have changed we know the change is at least relevant to the watchquery
@@ -59,20 +59,22 @@ func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) 
 		docBytes, err := json.Marshal(change.Document)
 		if err != nil {
 			log.Println("Can't marshal document. Assuming relevant")
-			return true
+			return true, true
 		}
 
 		if err := json.Unmarshal(docBytes, &docMap); err != nil {
 			log.Println("Can't unmarshal document. Assuming relevant")
-			return true
+			return true, true
 		}
 	}
+
+	sortingFields := watchQuery.QueryInformation.SortFields
 
 	// Extract updateDescription from the change document
 	updateDesc, ok := docMap["updateDescription"].(map[string]interface{})
 	if !ok {
 		log.Println("Can't parse updateDescription. Assuming relevant")
-		return true // If no updateDescription, assume it's relevant to be safe
+		return true, true // If no updateDescription, assume it's relevant to be safe
 	}
 
 	// Check updated fields
@@ -80,7 +82,8 @@ func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) 
 		for fieldPath := range updatedFields {
 			log.Println("Updated field: ", fieldPath)
 			if isSingleFieldInRelevantArray(fieldPath, relevantFields) {
-				return true
+				fieldIsSortRelevant := isSingleFieldInRelevantArray(fieldPath, sortingFields)
+				return true, fieldIsSortRelevant
 			}
 		}
 	}
@@ -91,7 +94,8 @@ func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) 
 			log.Println("Removed field: ", field)
 			if fieldStr, ok := field.(string); ok {
 				if isSingleFieldInRelevantArray(fieldStr, relevantFields) {
-					return true
+					fieldIsSortRelevant := isSingleFieldInRelevantArray(fieldStr, sortingFields)
+					return true, fieldIsSortRelevant
 				}
 			}
 		}
@@ -104,14 +108,15 @@ func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) 
 			if arrayMap, ok := arrayInfo.(map[string]interface{}); ok {
 				if field, ok := arrayMap["field"].(string); ok {
 					if isSingleFieldInRelevantArray(field, relevantFields) {
-						return true
+						fieldIsSortRelevant := isSingleFieldInRelevantArray(field, sortingFields)
+						return true, fieldIsSortRelevant
 					}
 				}
 			}
 		}
 	}
 
-	return false
+	return false, false
 }
 
 func isDocumentRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
@@ -135,40 +140,11 @@ func isDocumentRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEven
 // check if the update got made on any relevant field
 func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
 
-	isFieldChangedRelevant := isFieldRelevant(watchQuery, change)
+	isFieldChangedRelevant, isSortRelevant := isFieldRelevant(watchQuery, change)
 	isDocumentRelevant := isDocumentRelevant(watchQuery, change)
 
-	return isFieldChangedRelevant && isDocumentRelevant
-}
-
-func isChangeRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
-
-	// check operation type
-	// Skip if operation is not one of the supported types
-	switch change.Operation {
-	case "insert", "update", "delete", "replace":
-		// These operations are relevant, continue processing
-	default:
-		log.Println("Change is not relevant. Unsupported Operation: ", change.Operation)
-		return false
-	}
-
-	// first trivial check. If the collection is not the same we can skip it as the change will never be relevant
-	if watchQuery.Collection != change.Collection {
-		log.Println("Change is not relevant. Wrong Collection: ", change.Collection)
-		return false
-	}
-
-	switch change.Operation {
-	case "update":
-		updateRelevant := isUpdateRelevant(watchQuery, change)
-		log.Println("Is \"update\" event. Update relevant? ", updateRelevant)
-		return updateRelevant
-	default:
-	}
-
-	// TODO if the filter is directly on _ids we can just check if the change was made on the same _id
-	// an insertion will never be happening at this point as the _id is new and cannot be possibly watched
-
-	return true
+	// the base case here is if a relevant field got changed. if not we can completly ignore the update
+	// after that we check if the document is relevant by looking in our current window.
+	// if the document is not in our window we need to check if the change was made on a sorted field
+	return isFieldChangedRelevant && (isDocumentRelevant || isSortRelevant)
 }

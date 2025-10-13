@@ -88,7 +88,7 @@ export interface GravelMongoClient extends GravelClient {
     query: Record<string, any>,
     options?: GravelMongoWatchQueryFindOptions,
   ): Promise<{
-    initialQuery: Array<T>;
+    initialQuery: { result: Array<T> };
     changes: Observable<Array<T>>;
     stop: () => Promise<void>;
   }>;

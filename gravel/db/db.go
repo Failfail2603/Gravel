@@ -12,7 +12,7 @@ const (
 type DBProvider interface {
 	Connect() error
 	Disconnect() error
-	GetQueryAnalysis(query WatchQueryRequest) (QueryAnalysis, error)
+	GetQueryAnalysis(query WatchQueryRequest, queryResult *WatchQueryResponse, documentIds []string) (QueryAnalysis, error)
 	Query(collection string, query string, findOptions string) []interface{}
 	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
 	StopChangeStream()
@@ -81,4 +81,8 @@ func getDBConnectionIdentifier(connectionRequest DatabaseConnectRequest) (string
 	default:
 		return "", fmt.Errorf("unsupported database type: %s", connectionRequest.DBType)
 	}
+}
+
+func (w *WatchQuery) IsInfiniteWindow() bool {
+	return len(w.WatchedDocumentIds) == 0
 }

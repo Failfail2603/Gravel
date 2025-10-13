@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "start": "npx tsx src/index.ts < nul",
+    "start": "npx tsx src/index.ts",
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "jest",
@@ -23,6 +23,7 @@
   "license": "MIT",
   "dependencies": {
     "@nats-io/transport-node": "^3.1.0",
+    "fast-json-patch": "^3.1.1",
     "nats": "^2.19.0",
     "rxjs": "^7.8.2",
     "uuid": "^11.1.0"

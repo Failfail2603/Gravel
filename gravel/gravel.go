@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"gravel/db"
+	"gravel/json_patch"
 	"gravel/nats_server"
+	"gravel/relevant_changes"
 	"log"
 
 	"github.com/nats-io/nats.go"
@@ -200,22 +202,6 @@ func (gravel *GravelServer) StartListening() {
 		// if the watchqueries are empty we need to start the change stream
 		var shouldStartChangeStream bool = len(dbService.WatchQueries) == 0
 
-		queryInformation, err := dbService.Connection.GetQueryAnalysis(req)
-
-		if err != nil {
-			response := db.DebugMessage{
-				ClientID: req.ClientID,
-				Status:   "error",
-				Error:    err.Error(),
-			}
-			responseData, _ := json.Marshal(response)
-			if response.Error != "" {
-				log.Println(response.Error)
-			}
-			m.Respond(responseData)
-			return
-		}
-
 		// get the document ids from the query
 		// Extract document IDs from query results
 		var documentIds []string
@@ -240,6 +226,22 @@ func (gravel *GravelServer) StartListening() {
 			}
 		}
 
+		queryInformation, err := dbService.Connection.GetQueryAnalysis(req, queryResult, documentIds)
+
+		if err != nil {
+			response := db.DebugMessage{
+				ClientID: req.ClientID,
+				Status:   "error",
+				Error:    err.Error(),
+			}
+			responseData, _ := json.Marshal(response)
+			if response.Error != "" {
+				log.Println(response.Error)
+			}
+			m.Respond(responseData)
+			return
+		}
+
 		// if no we create a new watchquery and start the change stream
 		var newWatchQuery db.WatchQuery = db.WatchQuery{
 			ClientID:            req.ClientID,
@@ -252,6 +254,10 @@ func (gravel *GravelServer) StartListening() {
 			WatchedDocumentIds:  documentIds,
 		}
 
+		if queryInformation.WindowLimit == 0 {
+			newWatchQuery.WatchedDocumentIds = []string{}
+		}
+
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
 
 		if shouldStartChangeStream {
@@ -261,23 +267,19 @@ func (gravel *GravelServer) StartListening() {
 
 		go func() {
 			for update := range dbService.UpdateChannel {
-				// log.Println("Sending update to client", req.ClientID)
 
-				relevant := isChangeRelevant(&newWatchQuery, &update)
-				log.Println("Change is relevant to current watchquery: ", relevant)
+				patches := relevant_changes.GetPatchesForChange(dbService, &newWatchQuery, &update)
+
 				// check if the update is relevant for the watchquery
-				if !relevant {
+				if len(patches) == 0 {
 					continue
 				}
-
-				// convert the update to a string
-				updateString := parseChangeToJSONPatchString(&newWatchQuery, &update)
 
 				// send the update to the client
 				update := db.WatchQueryResponse{
 					QueryHash: req.Hash,
 					Type:      "patch",
-					Result:    updateString,
+					Result:    json_patch.PatchArrayToString(patches),
 				}
 
 				responseData, _ := json.Marshal(update)

@@ -1,3 +1,4 @@
+import { applyPatch, type Operation } from "fast-json-patch";
 import type { Msg, NatsError } from "nats";
 import { getGravelConnection, GravelDBs } from "./gravel";
 
@@ -20,20 +21,33 @@ async function test() {
 
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
-    {
-      $and: [{ role: "user" }, { email: /susan/i }],
-    },
+    {},
     {
       skip: 0,
-      limit: 20,
+      limit: 4,
       projection: { email: 1, address: { street: 1 } },
     },
   );
 
+  // Maintain current state of the data
+  console.log("Initial Query:");
   console.log(JSON.stringify(initialQuery, null, 2));
+  let currentData = initialQuery;
 
-  changes.subscribe((change) => {
-    console.log(change);
+  changes.subscribe((patches) => {
+    // Apply JSON patches to the current data
+    console.log("Received patches:");
+    console.log(JSON.stringify(patches, null, 2));
+    const patchResult = applyPatch(
+      currentData,
+      patches as Operation[],
+      false,
+      false,
+    );
+    currentData = patchResult.newDocument;
+
+    console.log("Updated Array after applying patches:");
+    console.log(JSON.stringify(currentData, null, 2));
   });
 
   // Handle Ctrl+C gracefully

@@ -54,6 +54,11 @@ type QueryAnalysis struct {
 	ProjectionFields []string
 	FilterFields     []string
 	SortFields       []string
+	// is skip
+	WindowStart int
+	// should be skip + limit
+	WindowEnd   int
+	WindowLimit int
 }
 
 // DebugMessage represents a debug message
