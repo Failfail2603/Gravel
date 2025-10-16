@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"gravel/db/mongo"
+	"slices"
 )
 
 const (
@@ -16,6 +17,8 @@ type DBProvider interface {
 	Query(collection string, query string, findOptions string) []interface{}
 	StartChangeStream(natsResponseChanneldbUpdates chan DBChangeStreamEvent)
 	StopChangeStream()
+	TestFilterWithDocument(filterJSON string, document interface{}) (bool, error)
+	GetIDFromEntry(entry interface{}) (string, error)
 }
 
 type WatchQuery struct {
@@ -85,4 +88,52 @@ func getDBConnectionIdentifier(connectionRequest DatabaseConnectRequest) (string
 
 func (w *WatchQuery) IsInfiniteWindow() bool {
 	return len(w.WatchedDocumentIds) == 0
+}
+
+func (w *WatchQuery) DocumentIsInWindow(documentId string) (bool, int) {
+	for i, watchedID := range w.WatchedDocumentIds {
+		if documentId == watchedID {
+			return true, i
+		}
+	}
+	return false, -1
+}
+
+// checks if
+func (w *WatchQuery) IsExhaustedWindow() bool {
+
+	// every infinite window is exhausted as every document is already in the window
+	if w.IsInfiniteWindow() {
+		return true
+	}
+
+	// if the window is not infinite it is exhausted if there are less documents in the window than the window limit
+	return len(w.WatchedDocumentIds) < w.QueryInformation.WindowLimit
+}
+
+func (w *WatchQuery) SaveRemoveDocumentFromWindow(documentIndex int) {
+
+	// infinite windows do not have a document in the window
+	if w.IsInfiniteWindow() {
+		return
+	}
+
+	// remove the document from the window
+	w.WatchedDocumentIds = slices.Delete(w.WatchedDocumentIds, documentIndex, documentIndex+1)
+}
+
+func (w *WatchQuery) SaveAddDocumentToWindow(_id string, documentIndex int) {
+
+	// infinite windows do not have a document in the window
+	if w.IsInfiniteWindow() {
+		return
+	}
+
+	// end of window is -1
+	if documentIndex == -1 {
+		w.WatchedDocumentIds = append(w.WatchedDocumentIds, _id)
+		return
+	}
+
+	w.WatchedDocumentIds = slices.Insert(w.WatchedDocumentIds, documentIndex, _id)
 }

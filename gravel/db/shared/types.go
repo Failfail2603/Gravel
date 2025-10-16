@@ -2,14 +2,23 @@ package shared
 
 import "time"
 
+// FieldUpdate represents a single field change within a database change event
+type FieldUpdate struct {
+	Field     string      `json:"field"`     // The field path (e.g., "name", "address.city")
+	Value     interface{} `json:"value"`     // The new value (nil for removed fields)
+	Operation string      `json:"operation"` // "set" for updated/inserted fields, "unset" for removed fields
+}
+
 // DBChangeStreamEvent represents a database change event
 type DBChangeStreamEvent struct {
-	Database   string      `json:"database"`
-	Collection string      `json:"collection"`
-	Operation  string      `json:"operation"`
-	ID         string      `json:"id"`
-	Document   interface{} `json:"document"`
-	Timestamp  time.Time   `json:"timestamp"`
+	Database     string        `json:"database"`
+	Collection   string        `json:"collection"`
+	Operation    string        `json:"operation"`
+	ID           string        `json:"id"`
+	FullUpdate   interface{}   `json:"document"`
+	FullDocument interface{}   `json:"fullDocument"` // The complete document after the change (for insert/update/replace)
+	Timestamp    time.Time     `json:"timestamp"`
+	Updates      []FieldUpdate `json:"updates"` // Individual field changes extracted from the change event
 }
 
 // DatabaseConnectRequest represents a request to connect to a database

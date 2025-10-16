@@ -1,16 +1,16 @@
 import { connect, type Msg, type NatsConnection, type NatsError } from "nats";
-import { type GravelClient } from "./db/gravelClient";
+import { type GravelClient } from "./db/gravelClient.js";
 import {
   generateMongoProvider,
   type GravelMongoClient,
   type GravelMongoOptions,
-} from "./db/mongo";
+} from "./db/mongo.js";
 import {
   generateRedisProvider,
   type GravelRedisClient,
   type GravelRedisOptions,
-} from "./db/redis";
-import { GravelChannels } from "./gravelChannels";
+} from "./db/redis.js";
+import { GravelChannels } from "./gravelChannels.js";
 
 export enum GravelDBs {
   MongoDB = "mongodb",

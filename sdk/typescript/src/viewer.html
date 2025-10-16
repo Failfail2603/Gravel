@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gravel Data Viewer</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+        margin-top: 0;
+      }
+      .status {
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        font-size: 14px;
+      }
+      .status.connected {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .status.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+      th,
+      td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      th {
+        background-color: #4caf50;
+        color: white;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      tr:hover {
+        background-color: #f5f5f5;
+      }
+      tr:nth-child(even) {
+        background-color: #fafafa;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+      }
+      .empty-state pre {
+        text-align: left;
+        background: #f5f5f5;
+        padding: 15px;
+        border-radius: 4px;
+        overflow: auto;
+        max-height: 400px;
+      }
+      .last-update {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🗄️ Gravel Real-Time Data Viewer</h1>
+      <div id="status" class="status connected">
+        Connected - Fetching data every second...
+      </div>
+      <div class="last-update" id="lastUpdate"></div>
+      <div id="tableContainer"></div>
+    </div>
+
+    <script>
+      let lastDataHash = "";
+
+      function flattenObject(obj, prefix = "") {
+        const flattened = {};
+
+        for (const key in obj) {
+          if (obj.hasOwnProperty(key)) {
+            const value = obj[key];
+            const newKey = prefix ? `${prefix}.${key}` : key;
+
+            if (
+              value !== null &&
+              typeof value === "object" &&
+              !Array.isArray(value)
+            ) {
+              // Recursively flatten nested objects
+              Object.assign(flattened, flattenObject(value, newKey));
+            } else if (Array.isArray(value)) {
+              // Convert arrays to JSON strings
+              flattened[newKey] = JSON.stringify(value);
+            } else {
+              flattened[newKey] = value;
+            }
+          }
+        }
+
+        return flattened;
+      }
+
+      function createTable(data) {
+        console.log("Creating table with data:", data);
+
+        if (!data) {
+          return '<div class="empty-state">No data received (null or undefined)</div>';
+        }
+
+        if (!Array.isArray(data)) {
+          return `<div class="empty-state">Data is not an array. Type: ${typeof data}<br><pre>${JSON.stringify(
+            data,
+            null,
+            2,
+          )}</pre></div>`;
+        }
+
+        if (data.length === 0) {
+          return '<div class="empty-state">No data available (empty array)</div>';
+        }
+
+        // Flatten all objects
+        const flattenedData = data.map((item) => flattenObject(item));
+        console.log("Flattened data:", flattenedData);
+
+        // Get all unique keys across all objects
+        const allKeys = new Set();
+        flattenedData.forEach((item) => {
+          Object.keys(item).forEach((key) => allKeys.add(key));
+        });
+
+        const headers = Array.from(allKeys);
+        console.log("Table headers:", headers);
+
+        if (headers.length === 0) {
+          return '<div class="empty-state">No fields found in data</div>';
+        }
+
+        // Create table HTML
+        let html = "<table><thead><tr>";
+        headers.forEach((header) => {
+          html += `<th>${escapeHtml(header)}</th>`;
+        });
+        html += "</tr></thead><tbody>";
+
+        flattenedData.forEach((row) => {
+          html += "<tr>";
+          headers.forEach((header) => {
+            const value = row[header] !== undefined ? row[header] : "";
+            html += `<td>${escapeHtml(String(value))}</td>`;
+          });
+          html += "</tr>";
+        });
+
+        html += "</tbody></table>";
+        return html;
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function updateLastUpdate() {
+        const now = new Date();
+        document.getElementById(
+          "lastUpdate",
+        ).textContent = `Last updated: ${now.toLocaleTimeString()}`;
+      }
+
+      async function fetchData() {
+        try {
+          const response = await fetch("/data");
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const data = await response.json();
+
+          // Debug: Log received data
+          console.log("Received data:", data);
+          console.log("Data type:", typeof data);
+          console.log("Is array:", Array.isArray(data));
+
+          // Check if data has changed
+          const dataHash = JSON.stringify(data);
+          if (dataHash !== lastDataHash) {
+            lastDataHash = dataHash;
+            document.getElementById("tableContainer").innerHTML =
+              createTable(data);
+            updateLastUpdate();
+          }
+
+          // Update status
+          document.getElementById("status").className = "status connected";
+          document.getElementById("status").textContent =
+            "Connected - Fetching data every second...";
+        } catch (error) {
+          console.error("Error fetching data:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error: ${error.message}`;
+        }
+      }
+
+      // Initial fetch
+      fetchData();
+
+      // Fetch data every second
+      setInterval(fetchData, 1000);
+    </script>
+  </body>
+</html>

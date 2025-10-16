@@ -3,6 +3,7 @@ package db
 // Re-export shared types for backward compatibility
 import "gravel/db/shared"
 
+type FieldUpdate = shared.FieldUpdate
 type DBChangeStreamEvent = shared.DBChangeStreamEvent
 type DatabaseConnectRequest = shared.DatabaseConnectRequest
 type DatabaseConnectResponse = shared.DatabaseConnectResponse

@@ -179,7 +179,7 @@ func (m *MongoProvider) StartChangeStream(dbUpdates chan shared.DBChangeStreamEv
 	}
 
 	// Create change stream options
-	opts := options.ChangeStream()
+	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
 
 	// Start change stream
 	changeStream, err := m.client.Watch(context.Background(), mongo.Pipeline{}, opts)
@@ -297,14 +297,21 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			test, _ := json.MarshalIndent(changeEvent, "", "  ")
 			log.Println("ChangeEvent", string(test))
 
+			// Extract full document (available for insert, update, replace operations)
+			var fullDocument interface{}
+			if fullDoc, exists := changeEvent["fullDocument"]; exists {
+				fullDocument = fullDoc
+			}
+
 			// Create and send change event
 			event := shared.DBChangeStreamEvent{
-				Database:   mongoUrl,
-				Operation:  operation,
-				ID:         id,
-				Collection: collection,
-				Document:   changeEvent,
-				Timestamp:  time.Now(),
+				Database:     mongoUrl,
+				Operation:    operation,
+				ID:           id,
+				Collection:   collection,
+				FullUpdate:   changeEvent,
+				FullDocument: fullDocument,
+				Timestamp:    time.Now(),
 			}
 
 			select {
@@ -318,6 +325,85 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			}
 		}
 	}
+}
+
+// TestFilterWithDocument tests if a MongoDB filter matches a given document
+// using an aggregation pipeline with $documents and $match stages.
+// This approach creates an ephemeral document in the pipeline without persisting it.
+// Returns true if the document matches the filter, false otherwise.
+//
+// Parameters:
+//   - filterJSON: MongoDB filter as a JSON string (e.g., `{"name": "test"}` or `{"name": {"$regex": "susan", "$options": "i"}}`)
+//   - document: The document to test (must be a map or struct)
+func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document interface{}) (bool, error) {
+	if m.client == nil {
+		return false, fmt.Errorf("MongoDB client not connected")
+	}
+
+	ctx := context.Background()
+
+	// Parse the filter JSON string to BSON
+	var filter bson.M
+	if err := bson.UnmarshalExtJSON([]byte(filterJSON), true, &filter); err != nil {
+		return false, fmt.Errorf("failed to parse filter JSON: %w", err)
+	}
+
+	// Create aggregation pipeline with $documents and $match stages
+	// $documents creates ephemeral documents that exist only in the pipeline
+	// $match applies the filter to those documents
+	pipeline := mongo.Pipeline{
+		{{Key: "$documents", Value: []interface{}{document}}},
+		{{Key: "$match", Value: filter}},
+	}
+
+	log.Printf("Testing filter with aggregation pipeline")
+
+	// Execute the aggregation on any database (we use admin since we don't need a real collection)
+	// The $documents stage creates ephemeral data, so no collection access is needed
+	cursor, err := m.client.Database("gravel").Aggregate(ctx, pipeline)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute aggregation: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	// Check if any documents were returned
+	// If the filter matched, we'll get the document back; otherwise, no results
+	hasResults := cursor.Next(ctx)
+	if err := cursor.Err(); err != nil {
+		return false, fmt.Errorf("cursor error: %w", err)
+	}
+
+	if hasResults {
+		log.Printf("Filter successfully matched the document")
+		return true, nil
+	}
+
+	log.Printf("Filter did not match the document")
+	return false, nil
+}
+
+// GetIDFromEntry extracts the _id field from a document entry and converts it to a string.
+// It handles different ID types (string, ObjectID, etc.) and returns an error if the ID cannot be extracted.
+func (m *MongoProvider) GetIDFromEntry(entry interface{}) (string, error) {
+	// Parse entry as bson.M
+	entryParsed, ok := entry.(bson.M)
+	if !ok {
+		return "", fmt.Errorf("failed to assert entry type to bson.M: %T", entry)
+	}
+
+	// Extract document ID, handling different types (string, ObjectID, etc.)
+	if docID, exists := entryParsed["_id"]; exists {
+		switch v := docID.(type) {
+		case string:
+			return v, nil
+		case primitive.ObjectID:
+			return v.Hex(), nil
+		default:
+			return fmt.Sprintf("%v", v), nil
+		}
+	}
+
+	return "", fmt.Errorf("document missing _id field: %+v", entryParsed)
 }
 
 // Destructures a query into its component parts and analyzes it to get all relevant information to watch it probably

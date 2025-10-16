@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"gravel/db"
 	"gravel/json_patch"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // ShiftDirection represents a one-step window shift direction.
@@ -62,27 +65,11 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.
 		skip = watchQuery.QueryInformation.WindowEnd - 1
 	}
 
-	// unmarshal options
-	optionsMap := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(watchQuery.Options), &optionsMap); err != nil {
-		fmt.Printf("Failed to unmarshal find options: %v", err)
-		return patches
-	}
-
-	// set the options up to only return one document
-	optionsMap["skip"] = skip
-	optionsMap["limit"] = 1
-	optionsJSON, err := json.Marshal(optionsMap)
-	if err != nil {
-		fmt.Printf("Failed to marshal find options: %v", err)
-		return patches
-	}
-
 	// query the new document
-	documents := dbService.Connection.Query(watchQuery.Collection, watchQuery.Query, string(optionsJSON))
+	newDocument := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, skip)
 
 	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
-	if len(documents) == 0 {
+	if newDocument == nil {
 		return patches
 	}
 
@@ -111,7 +98,7 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.
 	addPatch := json_patch.JSONPatch{
 		Op:    "add",
 		Path:  fmt.Sprintf("/result/%s", addIndex),
-		Value: documents[0],
+		Value: newDocument,
 	}
 	patches = append(patches, addPatch)
 
@@ -120,15 +107,61 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.
 	if dir == ShiftDown {
 		insertIndex = len(watchQuery.WatchedDocumentIds)
 	}
-	
+
 	// insert the new document ID at the correct position
-	doc, ok := documents[0].(map[string]interface{})
+	doc, ok := newDocument.(bson.M)
 	if !ok {
-		fmt.Printf("Failed to assert document type: %v", documents[0])
+		fmt.Printf("Failed to assert document type: %v", newDocument)
 		return patches
 	}
-	newId := doc["_id"].(string)
+
+	// Extract document ID, handling different types (string, ObjectID, etc.)
+	var newId string
+	if docID, exists := doc["_id"]; exists {
+		switch v := docID.(type) {
+		case string:
+			newId = v
+		case primitive.ObjectID:
+			newId = v.Hex()
+		default:
+			newId = fmt.Sprintf("%v", v)
+		}
+	} else {
+		fmt.Printf("Document missing _id field: %+v\n", doc)
+		return patches
+	}
 	watchQuery.WatchedDocumentIds = append(watchQuery.WatchedDocumentIds[:insertIndex], append([]string{newId}, watchQuery.WatchedDocumentIds[insertIndex:]...)...)
 
 	return patches
+}
+
+func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, index int) interface{} {
+	// unmarshal options
+	optionsMap := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(watchQuery.Options), &optionsMap); err != nil {
+		fmt.Printf("Failed to unmarshal find options: %v", err)
+		return nil
+	}
+
+	fmt.Printf("Options for single retrieve: %+v\n", watchQuery.QueryInformation)
+
+	// set the options up to only return one document
+	optionsMap["skip"] = index
+	optionsMap["limit"] = 1
+	fmt.Printf("Options for single retrieve: %+v\n", optionsMap)
+	optionsJSON, err := json.Marshal(optionsMap)
+	if err != nil {
+		fmt.Printf("Failed to marshal find options: %v", err)
+		return nil
+	}
+
+	// query the new document
+	documents := dbService.Connection.Query(watchQuery.Collection, watchQuery.Query, string(optionsJSON))
+
+	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
+	if len(documents) == 0 {
+		return nil
+	}
+
+	return documents[0]
 }

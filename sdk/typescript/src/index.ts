@@ -1,6 +1,13 @@
-import { applyPatch, type Operation } from "fast-json-patch";
+import express, { type Request, type Response } from "express";
+import patch, { type Operation } from "fast-json-patch";
 import type { Msg, NatsError } from "nats";
-import { getGravelConnection, GravelDBs } from "./gravel";
+import path from "path";
+import { fileURLToPath } from "url";
+import { getGravelConnection, GravelDBs } from "./gravel.js";
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function test() {
   const gravel = await getGravelConnection({
@@ -21,11 +28,13 @@ async function test() {
 
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
-    {},
+    {
+      email: /keep/,
+    },
     {
       skip: 0,
-      limit: 4,
-      projection: { email: 1, address: { street: 1 } },
+      limit: 2,
+      projection: { _id: 1, email: 1, address: { street: 1 }, role: 1 },
     },
   );
 
@@ -34,11 +43,34 @@ async function test() {
   console.log(JSON.stringify(initialQuery, null, 2));
   let currentData = initialQuery;
 
+  // Setup Express server
+  const app = express();
+  const PORT = 3000;
+
+  // Serve static HTML
+  app.get("/", (req: Request, res: Response) => {
+    res.sendFile(path.join(__dirname, "viewer.html"));
+  });
+
+  // API endpoint to get current data
+  app.get("/data", (req: Request, res: Response) => {
+    // Check if currentData has a result property and return just the array
+    const dataToSend =
+      currentData && typeof currentData === "object" && "result" in currentData
+        ? currentData.result
+        : currentData;
+    res.json(dataToSend);
+  });
+
+  app.listen(PORT, () => {
+    console.log(`Express server running at http://localhost:${PORT}`);
+  });
+
   changes.subscribe((patches) => {
     // Apply JSON patches to the current data
     console.log("Received patches:");
     console.log(JSON.stringify(patches, null, 2));
-    const patchResult = applyPatch(
+    const patchResult = patch.applyPatch(
       currentData,
       patches as Operation[],
       false,

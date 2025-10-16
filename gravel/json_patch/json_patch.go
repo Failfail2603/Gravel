@@ -38,3 +38,12 @@ func PatchArrayToString(patches []JSONPatch) string {
 	}
 	return string(patchBytes)
 }
+
+func GetBasePatchPath(index int) string {
+
+	if index == -1 {
+		return "/result/-"
+	}
+
+	return "/result/" + fmt.Sprint(index)
+}

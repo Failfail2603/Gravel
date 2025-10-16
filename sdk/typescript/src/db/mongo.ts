@@ -2,10 +2,10 @@ import type { NatsConnection } from "nats";
 import { BehaviorSubject, Subject } from "rxjs";
 import { Observable } from "rxjs/internal/Observable";
 import { v4 as uuidv4 } from "uuid";
-import { GravelDBs } from "../gravel";
-import { GravelChannels } from "../gravelChannels";
-import type { GravelDatabaseConnectRequest } from "../natsMessages";
-import type { GravelClient } from "./gravelClient";
+import { GravelDBs } from "../gravel.js";
+import { GravelChannels } from "../gravelChannels.js";
+import type { GravelDatabaseConnectRequest } from "../natsMessages.js";
+import type { GravelClient } from "./gravelClient.js";
 
 // #region Mongo search types
 

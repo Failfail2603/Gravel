@@ -22,7 +22,7 @@ func parseChangeToJSONPatchString(watchQuery *db.WatchQuery, event *db.DBChangeS
 	var patches []map[string]interface{}
 
 	// Convert the document to a map for easier processing
-	docBytes, err := json.Marshal(event.Document)
+	docBytes, err := json.Marshal(event.FullUpdate)
 	if err != nil {
 		log.Printf("Failed to marshal document: %v", err)
 		return "[]"
