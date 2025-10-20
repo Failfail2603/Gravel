@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"gravel/db"
 	"gravel/json_patch"
-
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"gravel/types"
 )
 
 // ShiftDirection represents a one-step window shift direction.
@@ -44,14 +42,14 @@ func isWindowShiftApplicable(watchQuery *db.WatchQuery, dir ShiftDirection) bool
 	// 1. we have less documents than the limit -> the window is already exhausted and we cannot shift down
 	// 2. we have exactly the limit of documents at the end -> we cannot check this as we do not know if there are documents below
 	// this is the only edgecase where this function returns true but the window should not be shiftable. The shift function will need to check for this
-	if dir == ShiftDown && watchQuery.QueryInformation.WindowLimit == len(watchQuery.WatchedDocumentIds) {
+	if dir == ShiftDown && watchQuery.QueryInformation.WindowLimit == len(watchQuery.WatchedDocuments) {
 		return true
 	}
 
 	return false
 }
 
-func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent, dir ShiftDirection) []json_patch.JSONPatch {
+func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, dir ShiftDirection) []json_patch.JSONPatch {
 	patches := []json_patch.JSONPatch{}
 
 	// early exit if the window is not shiftable
@@ -87,7 +85,7 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.
 	patches = append(patches, deletePatch)
 
 	// remove the _id from the watched document ids
-	watchQuery.WatchedDocumentIds = append(watchQuery.WatchedDocumentIds[:removeIndex], watchQuery.WatchedDocumentIds[removeIndex+1:]...)
+	watchQuery.SaveRemoveDocumentFromWindow(removeIndex)
 
 	addIndex := "0"
 	if dir == ShiftDown {
@@ -105,37 +103,15 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.
 	// insert the _id at the correct position
 	insertIndex := 0
 	if dir == ShiftDown {
-		insertIndex = len(watchQuery.WatchedDocumentIds)
+		insertIndex = len(watchQuery.WatchedDocuments)
 	}
 
-	// insert the new document ID at the correct position
-	doc, ok := newDocument.(bson.M)
-	if !ok {
-		fmt.Printf("Failed to assert document type: %v", newDocument)
-		return patches
-	}
-
-	// Extract document ID, handling different types (string, ObjectID, etc.)
-	var newId string
-	if docID, exists := doc["_id"]; exists {
-		switch v := docID.(type) {
-		case string:
-			newId = v
-		case primitive.ObjectID:
-			newId = v.Hex()
-		default:
-			newId = fmt.Sprintf("%v", v)
-		}
-	} else {
-		fmt.Printf("Document missing _id field: %+v\n", doc)
-		return patches
-	}
-	watchQuery.WatchedDocumentIds = append(watchQuery.WatchedDocumentIds[:insertIndex], append([]string{newId}, watchQuery.WatchedDocumentIds[insertIndex:]...)...)
+	watchQuery.SaveAddDocumentToWindow(dbService, newDocument[0], insertIndex)
 
 	return patches
 }
 
-func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, index int) interface{} {
+func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, index int) []types.Document {
 	// unmarshal options
 	optionsMap := map[string]interface{}{}
 	if err := json.Unmarshal([]byte(watchQuery.Options), &optionsMap); err != nil {
@@ -163,5 +139,5 @@ func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.Wa
 		return nil
 	}
 
-	return documents[0]
+	return documents
 }

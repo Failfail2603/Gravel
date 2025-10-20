@@ -1,4 +1,4 @@
-package shared
+package types
 
 import "time"
 
@@ -58,11 +58,28 @@ type WatchQueryResponse struct {
 	Result    string `json:"result"`
 }
 
+type SortField struct {
+	Field string `json:"field"`
+
+	// 1 ascending, -1 descending
+	Order int `json:"order"`
+}
+
+type WatchedDocument struct {
+	ID string `json:"id"`
+
+	// use the "any" type here as we do not know at compile time which types the sorted values have
+	SortValues []interface{} `json:"sortValues"`
+}
+
+// Document represents a MongoDB document as a map with string keys and values of any type
+type Document map[string]interface{}
+
 // QueryAnalysis contains analysis information about a query
 type QueryAnalysis struct {
 	ProjectionFields []string
 	FilterFields     []string
-	SortFields       []string
+	SortFields       []SortField
 	// is skip
 	WindowStart int
 	// should be skip + limit

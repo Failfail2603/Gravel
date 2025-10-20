@@ -2,7 +2,7 @@ package relevant_changes
 
 import (
 	"encoding/json"
-	"gravel/db/shared"
+	"gravel/types"
 	"log"
 )
 
@@ -15,7 +15,7 @@ import (
 //
 // Example usage:
 //
-//	change := &shared.DBChangeStreamEvent{
+//	change := &types.DBChangeStreamEvent{
 //	    Operation: "update",
 //	    Document: map[string]interface{}{
 //	        "updateDescription": map[string]interface{}{
@@ -33,8 +33,8 @@ import (
 //	//   {Field: "age", Value: 30, Operation: "set"},
 //	//   {Field: "oldField", Value: nil, Operation: "unset"}
 //	// ]
-func ExtractFieldUpdates(change *shared.DBChangeStreamEvent) []shared.FieldUpdate {
-	updates := []shared.FieldUpdate{}
+func ExtractFieldUpdates(change *types.DBChangeStreamEvent) []types.FieldUpdate {
+	updates := []types.FieldUpdate{}
 
 	// Convert Document to map for easier navigation
 	var docMap map[string]interface{}
@@ -60,7 +60,7 @@ func ExtractFieldUpdates(change *shared.DBChangeStreamEvent) []shared.FieldUpdat
 			// Handle updatedFields
 			if updatedFields, ok := updateDesc["updatedFields"].(map[string]interface{}); ok {
 				for field, value := range updatedFields {
-					updates = append(updates, shared.FieldUpdate{
+					updates = append(updates, types.FieldUpdate{
 						Field:     field,
 						Value:     value,
 						Operation: "set",
@@ -72,7 +72,7 @@ func ExtractFieldUpdates(change *shared.DBChangeStreamEvent) []shared.FieldUpdat
 			if removedFields, ok := updateDesc["removedFields"].([]interface{}); ok {
 				for _, field := range removedFields {
 					if fieldStr, ok := field.(string); ok {
-						updates = append(updates, shared.FieldUpdate{
+						updates = append(updates, types.FieldUpdate{
 							Field:     fieldStr,
 							Value:     nil,
 							Operation: "unset",
@@ -103,7 +103,7 @@ func ExtractFieldUpdates(change *shared.DBChangeStreamEvent) []shared.FieldUpdat
 
 // flattenFields recursively flattens nested objects into dot-notation field paths
 // e.g., {"user": {"name": "John", "age": 30}} becomes ["user.name", "user.age"]
-func flattenFields(obj map[string]interface{}, prefix string, updates *[]shared.FieldUpdate) {
+func flattenFields(obj map[string]interface{}, prefix string, updates *[]types.FieldUpdate) {
 	for key, value := range obj {
 		fieldPath := key
 		if prefix != "" {
@@ -116,7 +116,7 @@ func flattenFields(obj map[string]interface{}, prefix string, updates *[]shared.
 			flattenFields(nestedObj, fieldPath, updates)
 		} else {
 			// Add leaf field
-			*updates = append(*updates, shared.FieldUpdate{
+			*updates = append(*updates, types.FieldUpdate{
 				Field:     fieldPath,
 				Value:     value,
 				Operation: "set",

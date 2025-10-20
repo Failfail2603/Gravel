@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"encoding/json"
+	"gravel/types"
 
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -34,4 +35,25 @@ func parseFindOptionsString(findOptionsString string) (options.FindOptions, erro
 	}
 
 	return *findOptions, nil
+}
+
+func extractSortFields(findOptions options.FindOptions) []types.SortField {
+	var sortFields []types.SortField
+
+	if findOptions.Sort != nil {
+		if sort, ok := findOptions.Sort.(map[string]interface{}); ok {
+			for field, orderVal := range sort {
+				order := 1 // default ascending
+				if orderInt, ok := orderVal.(int); ok {
+					order = orderInt
+				}
+				sortFields = append(sortFields, types.SortField{
+					Field: field,
+					Order: order,
+				})
+			}
+		}
+	}
+
+	return sortFields
 }

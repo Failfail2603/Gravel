@@ -7,6 +7,7 @@ import (
 	"gravel/json_patch"
 	"gravel/nats_server"
 	"gravel/relevant_changes"
+	"gravel/types"
 	"log"
 
 	"github.com/nats-io/nats.go"
@@ -35,7 +36,7 @@ func generateGravelServer(natsConnection *nats_server.NatsConnection) *GravelSer
 	}
 }
 
-func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryRequest) (*db.WatchQueryResponse, error) {
+func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQueryRequest) (*types.WatchQueryResponse, error) {
 	// Execute the query using the dbService
 	results := dbService.Connection.Query(req.CollectionName, req.Query, req.Options)
 
@@ -53,7 +54,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req db.WatchQueryR
 		resultData = []byte("[]")
 	}
 
-	response := db.WatchQueryResponse{
+	response := types.WatchQueryResponse{
 		QueryHash: req.Hash,
 		Type:      "full",
 		Result:    string(resultData),
@@ -80,12 +81,12 @@ func (gravel *GravelServer) StartListening() {
 
 	gravel.natsConnection.SubscribeTo("gravel.connect", func(m *nats.Msg) {
 		log.Println("Received gravel.connect request")
-		var req db.DatabaseConnectRequest
+		var req types.DatabaseConnectRequest
 
 		// check if request is valid and parse it to internal type
 		//
 		if err := json.Unmarshal(m.Data, &req); err != nil {
-			response := db.DatabaseConnectResponse{
+			response := types.DatabaseConnectResponse{
 				Status:   "error",
 				Database: req.MongoURL,
 				Error:    err.Error(),
@@ -104,7 +105,7 @@ func (gravel *GravelServer) StartListening() {
 
 			// there can be errors in the connection buildup. We want to give them back to the client which is connected, because it should be config error
 			if err != nil {
-				response := db.DatabaseConnectResponse{
+				response := types.DatabaseConnectResponse{
 					Status:   "error",
 					Database: req.MongoURL,
 					Error:    err.Error(),
@@ -118,7 +119,7 @@ func (gravel *GravelServer) StartListening() {
 		}
 
 		// Send success response
-		response := db.DatabaseConnectResponse{
+		response := types.DatabaseConnectResponse{
 			Status:   "connected",
 			Database: req.MongoURL,
 		}
@@ -128,12 +129,12 @@ func (gravel *GravelServer) StartListening() {
 
 	gravel.natsConnection.SubscribeTo("gravel.watchquery", func(m *nats.Msg) {
 		log.Println("Received gravel.watchquery request")
-		var req db.WatchQueryRequest
+		var req types.WatchQueryRequest
 
 		// check if request is valid and parse it to internal type
 		//
 		if err := json.Unmarshal(m.Data, &req); err != nil {
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Status:   "error",
 				Error:    err.Error(),
@@ -149,7 +150,7 @@ func (gravel *GravelServer) StartListening() {
 		var dbService *db.DBService = gravel.dbServices[req.ClientID]
 
 		if dbService == nil {
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Status:   "error",
 				Error:    "No database connection found for client " + req.ClientID,
@@ -165,7 +166,7 @@ func (gravel *GravelServer) StartListening() {
 		// run the initial query which directly pipes to the client
 		queryResult, err := gravel.runQuery(dbService, req)
 		if err != nil {
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Status:   "error",
 				Error:    "Failed to execute initial query: " + err.Error(),
@@ -186,7 +187,7 @@ func (gravel *GravelServer) StartListening() {
 		// if yes we just count up the connections count. We do not need to do anything else as gravel already sends updates down the channel
 		if watchQuery != nil {
 			watchQuery.NumberOfConnections++
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Message:  "Matching watchquery found for Query with Hash " + req.Hash + ". Increased connection count to " + fmt.Sprint(watchQuery.NumberOfConnections),
 				Status:   "success",
@@ -202,34 +203,10 @@ func (gravel *GravelServer) StartListening() {
 		// if the watchqueries are empty we need to start the change stream
 		var shouldStartChangeStream bool = len(dbService.WatchQueries) == 0
 
-		// get the document ids from the query
-		// Extract document IDs from query results
-		var documentIds []string
-		if queryResult != nil && queryResult.Result != "" {
-			var results []map[string]interface{}
-			if err := json.Unmarshal([]byte(queryResult.Result), &results); err != nil {
-				log.Printf("Failed to unmarshal query results to extract document IDs: %v", err)
-			} else {
-				// Extract _id field from each document
-				for _, doc := range results {
-					if id, exists := doc["_id"]; exists {
-						// Convert ObjectID to string if needed
-						if idStr, ok := id.(string); ok {
-							documentIds = append(documentIds, idStr)
-						} else {
-							// Handle ObjectID or other types by converting to string
-							documentIds = append(documentIds, fmt.Sprintf("%v", id))
-						}
-					}
-				}
-				log.Printf("Extracted %d document IDs: %v", len(documentIds), documentIds)
-			}
-		}
-
-		queryInformation, err := dbService.Connection.GetQueryAnalysis(req, queryResult, documentIds)
+		queryInformation, err := dbService.Connection.GetQueryAnalysis(req, queryResult)
 
 		if err != nil {
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Status:   "error",
 				Error:    err.Error(),
@@ -251,17 +228,39 @@ func (gravel *GravelServer) StartListening() {
 			Options:             req.Options,
 			NumberOfConnections: 1,
 			QueryInformation:    queryInformation,
-			WatchedDocumentIds:  documentIds,
 		}
 
-		if queryInformation.WindowLimit == 0 {
-			newWatchQuery.WatchedDocumentIds = []string{}
+		// build watched document if the window is not infinite
+		watchedDocuments := []types.WatchedDocument{}
+		if !newWatchQuery.IsInfiniteWindow() {
+
+			// parse the result to documents
+			var documents []types.Document
+			if queryResult != nil && queryResult.Result != "" {
+				if err := json.Unmarshal([]byte(queryResult.Result), &documents); err != nil {
+					log.Printf("Failed to unmarshal query results to extract document IDs: %v", err)
+				}
+			}
+
+			for _, document := range documents {
+
+				watchedDocument, err := dbService.Connection.GetWatchedDocumentInfo(document, queryInformation)
+				if err != nil {
+					log.Printf("Failed to get watched document info: %v", err)
+					continue
+				}
+
+				watchedDocuments = append(watchedDocuments, watchedDocument)
+			}
 		}
 
+		newWatchQuery.WatchedDocuments = watchedDocuments
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
 
+		log.Printf("WatchedDocuments: %+v", watchedDocuments)
+
 		if shouldStartChangeStream {
-			dbService.UpdateChannel = make(chan db.DBChangeStreamEvent)
+			dbService.UpdateChannel = make(chan types.DBChangeStreamEvent)
 			go dbService.Connection.StartChangeStream(dbService.UpdateChannel)
 		}
 
@@ -276,7 +275,7 @@ func (gravel *GravelServer) StartListening() {
 				}
 
 				// send the update to the client
-				update := db.WatchQueryResponse{
+				update := types.WatchQueryResponse{
 					QueryHash: req.Hash,
 					Type:      "patch",
 					Result:    json_patch.PatchArrayToString(patches),
@@ -287,7 +286,7 @@ func (gravel *GravelServer) StartListening() {
 			}
 		}()
 
-		response := db.DebugMessage{
+		response := types.DebugMessage{
 			ClientID: req.ClientID,
 			Message:  "Successfully initialized watchquery for Query with Hash " + req.Hash,
 			Status:   "success",
@@ -302,11 +301,11 @@ func (gravel *GravelServer) StartListening() {
 
 	gravel.natsConnection.SubscribeTo("gravel.watchquery.stop", func(m *nats.Msg) {
 		log.Println("Received gravel.watchquery.stop request")
-		var req db.WatchQueryStopRequest
+		var req types.WatchQueryStopRequest
 
 		// check if request is valid and parse it to internal type
 		if err := json.Unmarshal(m.Data, &req); err != nil {
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Status:   "error",
 				Error:    err.Error(),
@@ -322,7 +321,7 @@ func (gravel *GravelServer) StartListening() {
 
 		if watchQuery == nil {
 			log.Println("Watchquery not found for client ", req.ClientID, " and hash ", req.Hash)
-			response := db.DebugMessage{
+			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Status:   "error",
 				Error:    "Watchquery not found for client " + req.ClientID + " and hash " + req.Hash + " Query is already disconnected",
@@ -346,7 +345,7 @@ func (gravel *GravelServer) StartListening() {
 
 		log.Println("Stopped watchquery for client", req.ClientID, "and hash", req.Hash)
 
-		response := db.DebugMessage{
+		response := types.DebugMessage{
 			ClientID: req.ClientID,
 			Message:  "Successfully stopped watchquery for Query with Hash " + req.Hash,
 			Status:   "success",

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"gravel/db/shared"
+	"gravel/types"
 	"log"
 	"net/url"
 	"slices"
@@ -81,7 +81,7 @@ func (m *MongoProvider) Connect() error {
 }
 
 // Query runs a normal query against the database. Mainly used for initial data loading
-func (m *MongoProvider) Query(collection string, query string, findOptionsStr string) []interface{} {
+func (m *MongoProvider) Query(collection string, query string, findOptionsStr string) []types.Document {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot execute query")
 		return nil
@@ -120,14 +120,14 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 	defer cursor.Close(ctx)
 
 	// Collect results
-	var results []interface{}
+	var results []types.Document
 	for cursor.Next(ctx) {
 		var doc bson.M
 		if err := cursor.Decode(&doc); err != nil {
 			log.Printf("Failed to decode document: %v", err)
 			continue
 		}
-		results = append(results, doc)
+		results = append(results, types.Document(doc))
 	}
 
 	if err := cursor.Err(); err != nil {
@@ -164,7 +164,7 @@ func (m *MongoProvider) Disconnect() error {
 }
 
 // StartChangeStream starts monitoring changes for a specific database and collection
-func (m *MongoProvider) StartChangeStream(dbUpdates chan shared.DBChangeStreamEvent) {
+func (m *MongoProvider) StartChangeStream(dbUpdates chan types.DBChangeStreamEvent) {
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot start change stream for %s", m.MongoUrl)
 		return
@@ -223,7 +223,7 @@ func (m *MongoProvider) stopChangeStreamInternal(key string) {
 }
 
 // handleChangeStream processes change stream events
-func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan shared.DBChangeStreamEvent, stopChan chan struct{}) {
+func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbUpdates chan types.DBChangeStreamEvent, stopChan chan struct{}) {
 	// Capture the MongoUrl at the start to avoid accessing it after potential cleanup
 	mongoUrl := m.MongoUrl
 
@@ -304,7 +304,7 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			}
 
 			// Create and send change event
-			event := shared.DBChangeStreamEvent{
+			event := types.DBChangeStreamEvent{
 				Database:     mongoUrl,
 				Operation:    operation,
 				ID:           id,
@@ -335,7 +335,7 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 // Parameters:
 //   - filterJSON: MongoDB filter as a JSON string (e.g., `{"name": "test"}` or `{"name": {"$regex": "susan", "$options": "i"}}`)
 //   - document: The document to test (must be a map or struct)
-func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document interface{}) (bool, error) {
+func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document types.Document) (bool, error) {
 	if m.client == nil {
 		return false, fmt.Errorf("MongoDB client not connected")
 	}
@@ -352,7 +352,7 @@ func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document inter
 	// $documents creates ephemeral documents that exist only in the pipeline
 	// $match applies the filter to those documents
 	pipeline := mongo.Pipeline{
-		{{Key: "$documents", Value: []interface{}{document}}},
+		{{Key: "$documents", Value: []types.Document{document}}},
 		{{Key: "$match", Value: filter}},
 	}
 
@@ -382,41 +382,17 @@ func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document inter
 	return false, nil
 }
 
-// GetIDFromEntry extracts the _id field from a document entry and converts it to a string.
-// It handles different ID types (string, ObjectID, etc.) and returns an error if the ID cannot be extracted.
-func (m *MongoProvider) GetIDFromEntry(entry interface{}) (string, error) {
-	// Parse entry as bson.M
-	entryParsed, ok := entry.(bson.M)
-	if !ok {
-		return "", fmt.Errorf("failed to assert entry type to bson.M: %T", entry)
-	}
-
-	// Extract document ID, handling different types (string, ObjectID, etc.)
-	if docID, exists := entryParsed["_id"]; exists {
-		switch v := docID.(type) {
-		case string:
-			return v, nil
-		case primitive.ObjectID:
-			return v.Hex(), nil
-		default:
-			return fmt.Sprintf("%v", v), nil
-		}
-	}
-
-	return "", fmt.Errorf("document missing _id field: %+v", entryParsed)
-}
-
 // Destructures a query into its component parts and analyzes it to get all relevant information to watch it probably
-func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest, queryResult *shared.WatchQueryResponse, documentIds []string) (shared.QueryAnalysis, error) {
+func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryResult *types.WatchQueryResponse) (types.QueryAnalysis, error) {
 
-	var queryInformation = shared.QueryAnalysis{}
+	var queryInformation = types.QueryAnalysis{}
 
 	// ======== analyze projections ========
 
 	// parse the find options to retrieve the projection as an object
 	findOptions, err := parseFindOptionsString(query.Options)
 	if err != nil {
-		return shared.QueryAnalysis{}, err
+		return types.QueryAnalysis{}, err
 	}
 
 	// Extract relevant fields from projection. which should be every key existing in the projection
@@ -432,24 +408,28 @@ func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest, queryRe
 	// parse the query string to retrieve the filter as an object
 	queryObject, err := parseQueryString(query.Query)
 	if err != nil {
-		return shared.QueryAnalysis{}, err
+		return types.QueryAnalysis{}, err
 	}
 
 	// Extract relevant fields from query
 	queryInformation.FilterFields, err = getRelevantFieldsFromQueryObject(queryObject)
 	if err != nil {
-		return shared.QueryAnalysis{}, err
+		return types.QueryAnalysis{}, err
 	}
 
 	// ======== analyze sort ========
 
 	// Extract relevant fields from sort. we only need the keys here as sorting order is not relevant in this case
-	queryInformation.SortFields = flattenObject(findOptions.Sort)
+	queryInformation.SortFields = extractSortFields(findOptions)
 
-	// if no sort is given mongo will sort by _id, by default.
-	if len(queryInformation.SortFields) == 0 {
-		queryInformation.SortFields = append(queryInformation.SortFields, "_id")
-	}
+	// debug print
+	log.Printf("SortFields: %+v\n", queryInformation.SortFields)
+
+	// append default sort by id
+	queryInformation.SortFields = append(queryInformation.SortFields, types.SortField{
+		Field: "_id",
+		Order: 1,
+	})
 
 	// ======== analyze window ========
 	queryInformation.WindowStart = int(*findOptions.Skip)
@@ -457,4 +437,22 @@ func (m *MongoProvider) GetQueryAnalysis(query shared.WatchQueryRequest, queryRe
 	queryInformation.WindowLimit = int(*findOptions.Limit)
 
 	return queryInformation, nil
+}
+
+func (m *MongoProvider) GetWatchedDocumentInfo(document types.Document, queryInformation types.QueryAnalysis) (types.WatchedDocument, error) {
+
+	// Extract document ID using the database provider
+	docID, err := GetIDFromEntry(document)
+	if err != nil {
+		fmt.Printf("Failed to extract document ID: %v\n", err)
+		return types.WatchedDocument{}, err
+	}
+
+	// Extract sort values from document
+	sortValues := getSortValuesFromDocument(document, queryInformation.SortFields)
+
+	return types.WatchedDocument{
+		ID:         docID,
+		SortValues: sortValues,
+	}, nil
 }

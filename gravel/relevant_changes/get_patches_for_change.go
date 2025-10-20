@@ -3,10 +3,11 @@ package relevant_changes
 import (
 	"gravel/db"
 	"gravel/json_patch"
+	"gravel/types"
 	"log"
 )
 
-func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) []json_patch.JSONPatch {
+func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent) []json_patch.JSONPatch {
 	patches := []json_patch.JSONPatch{}
 
 	// check operation type

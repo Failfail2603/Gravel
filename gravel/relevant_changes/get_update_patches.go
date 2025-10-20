@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"gravel/db"
 	"gravel/json_patch"
+	"gravel/types"
 	"log"
-
-	"go.mongodb.org/mongo-driver/bson"
 )
 
-// func getUpdateChanged(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent): string {
+// func getUpdateChanged(watchQuery *types.WatchQuery, change *types.DBChangeStreamEvent): string {
 
 // an update will change a field in one document
 
@@ -52,7 +51,7 @@ import (
 // - update does not fall under the filter -> all filter checks for removal and on stay user sort checks
 // }
 
-func getSimpleUpdatePatch(update *db.FieldUpdate, documentIndex int) json_patch.JSONPatch {
+func getSimpleUpdatePatch(update *types.FieldUpdate, documentIndex int) json_patch.JSONPatch {
 	return json_patch.JSONPatch{
 		Op:    "replace",
 		Path:  json_patch.GetBasePatchPath(documentIndex) + "/" + update.Field,
@@ -60,11 +59,11 @@ func getSimpleUpdatePatch(update *db.FieldUpdate, documentIndex int) json_patch.
 	}
 }
 
-func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent, update *db.FieldUpdate, isDocumentInWindow bool, documentIndex int) []json_patch.JSONPatch {
+func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, update *types.FieldUpdate, isDocumentInWindow bool, documentIndex int) []json_patch.JSONPatch {
 
 	doc := change.FullDocument
 
-	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, doc)
+	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, doc.(types.Document))
 	println("Matched: ", matched)
 	if err != nil {
 		log.Printf("Error testing filter: %v", err)
@@ -96,35 +95,20 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 
 		// as the document would fall out of the query we can simply query for the new end of the window
 		// as window end is pointing one higher than the last document we need to query the document before
-		newDocument := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowEnd-1)
+		newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowEnd-1)
 
 		// we already checked if the window was exhausted before, but if we are exactly at the end of the window we cannot detemrine exhaustion by length of watched _ids. In this case the newDocument will be nil
-		if newDocument == nil {
-			return patches
-		}
-
-		// Extract document ID using the database provider
-		newDocID, err := dbService.Connection.GetIDFromEntry(newDocument)
-		if err != nil {
-			fmt.Printf("Failed to extract document ID: %v\n", err)
-			return patches
-		}
-
-		fmt.Printf("New document ID: %s\n", newDocID)
-
-		// Parse document for the patch
-		newDocumentParsed, ok := newDocument.(bson.M)
-		if !ok {
-			fmt.Printf("Failed to assert document type: %v", newDocument)
+		if len(newDocuments) == 0 {
 			return patches
 		}
 
 		// add the new document at the end of the array
-		patches = append(patches, GetSimpleAddPatch(-1, newDocumentParsed))
-		watchQuery.SaveAddDocumentToWindow(newDocID, -1)
+		patches = append(patches, GetSimpleAddPatch(-1, newDocuments[0]))
+
+		watchQuery.SaveAddDocumentToWindow(dbService, newDocuments[0], -1)
 
 		// debug print the tracked ids
-		fmt.Printf("Tracked IDs: %v\n", watchQuery.WatchedDocumentIds)
+		fmt.Printf("Tracked IDs: %v\n", watchQuery.WatchedDocuments)
 
 		return patches
 
@@ -179,7 +163,7 @@ func optimizePatches(patches []json_patch.JSONPatch) []json_patch.JSONPatch {
 	return optimized
 }
 
-func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) []json_patch.JSONPatch {
+func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent) []json_patch.JSONPatch {
 	patches := []json_patch.JSONPatch{}
 
 	updatedDocumentIsInWindow, documentIndex := watchQuery.DocumentIsInWindow(change.ID)
@@ -210,7 +194,7 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 // #region old code
 
-// func isFieldRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) (bool, bool) {
+// func isFieldRelevant(watchQuery *types.WatchQuery, change *types.DBChangeStreamEvent) (bool, bool) {
 
 // 	// if the projection is empty we need to watch the entire document so every change is relevant
 // 	if len(watchQuery.QueryInformation.ProjectionFields) == 0 {
@@ -250,7 +234,7 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 // 	return false, false
 // }
 
-// func isDocumentRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+// func isDocumentRelevant(watchQuery *types.WatchQuery, change *types.DBChangeStreamEvent) bool {
 
 // 	// TODO make this better at the moment we have no window shifting
 // 	// check if the update is relevant to the watched documents
@@ -269,7 +253,7 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 // }
 
 // // check if the update got made on any relevant field
-// func isUpdateRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+// func isUpdateRelevant(watchQuery *types.WatchQuery, change *types.DBChangeStreamEvent) bool {
 
 // 	isFieldChangedRelevant, isSortRelevant := isFieldRelevant(watchQuery, change)
 // 	isDocumentRelevant := isDocumentRelevant(watchQuery, change)

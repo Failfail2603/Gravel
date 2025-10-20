@@ -11,8 +11,6 @@ import (
 
 func main() {
 
-	log.Println("Starting Gravel")
-
 	// if the .env file is not found we warn the user as we are using internal standard values.
 	// Standard values are the standard values of the different services like nats or mongo
 	env.WarnIfEnvFileNotFound()
@@ -100,7 +98,7 @@ func (s *GravelServer) startChangeStream(clientID string) {
 	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
 
 	// Start change stream on all collections
-	changeStream, err := db.Watch(context.Background(), mongo.Pipeline{}, opts)
+	changeStream, err := types.Watch(context.Background(), mongo.Pipeline{}, opts)
 	if err != nil {
 		log.Printf("Failed to start change stream for client %s: %v", clientID, err)
 		return

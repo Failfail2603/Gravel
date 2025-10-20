@@ -32,9 +32,18 @@ async function test() {
       email: /keep/,
     },
     {
+      sort: {
+        debitor: -1,
+      },
       skip: 0,
       limit: 2,
-      projection: { _id: 1, email: 1, address: { street: 1 }, role: 1 },
+      projection: {
+        _id: 1,
+        email: 1,
+        address: { street: 1 },
+        role: 1,
+        debitor: 1,
+      },
     },
   );
 

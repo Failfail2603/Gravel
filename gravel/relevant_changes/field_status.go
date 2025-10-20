@@ -2,6 +2,7 @@ package relevant_changes
 
 import (
 	"gravel/db"
+	"gravel/types"
 	"strings"
 )
 
@@ -28,19 +29,23 @@ func isSingleFieldInRelevantArray(fieldPath string, relevantFields []string) boo
 	return false
 }
 
-func IsProjectedField(watchQuery *db.WatchQuery, singleUpdate *db.FieldUpdate) bool {
+func IsProjectedField(watchQuery *db.WatchQuery, singleUpdate *types.FieldUpdate) bool {
 	return isSingleFieldInRelevantArray(singleUpdate.Field, watchQuery.QueryInformation.ProjectionFields)
 }
 
-func IsFilteredField(watchQuery *db.WatchQuery, singleUpdate *db.FieldUpdate) bool {
+func IsFilteredField(watchQuery *db.WatchQuery, singleUpdate *types.FieldUpdate) bool {
 	return isSingleFieldInRelevantArray(singleUpdate.Field, watchQuery.QueryInformation.FilterFields)
 }
 
-func IsSortedField(watchQuery *db.WatchQuery, singleUpdate *db.FieldUpdate) bool {
-	return isSingleFieldInRelevantArray(singleUpdate.Field, watchQuery.QueryInformation.SortFields)
+func IsSortedField(watchQuery *db.WatchQuery, singleUpdate *types.FieldUpdate) bool {
+	var sortFields []string
+	for _, sortField := range watchQuery.QueryInformation.SortFields {
+		sortFields = append(sortFields, sortField.Field)
+	}
+	return isSingleFieldInRelevantArray(singleUpdate.Field, sortFields)
 }
 
-// func GetUpdatedFieldPaths(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) []string {
+// func GetUpdatedFieldPaths(watchQuery *types.WatchQuery, change *types.DBChangeStreamEvent) []string {
 // 	updatedFieldPaths := []string{}
 
 // 	// Extract updateDescription from the change document

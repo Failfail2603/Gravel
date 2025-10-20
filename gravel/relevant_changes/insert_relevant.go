@@ -1,6 +1,6 @@
 package relevant_changes
 
-// func isInsertRelevant(watchQuery *db.WatchQuery, change *db.DBChangeStreamEvent) bool {
+// func isInsertRelevant(watchQuery *types.WatchQuery, change *types.DBChangeStreamEvent) bool {
 
 // 	isFieldChangedRelevant, isDocumentRelevant := isFieldRelevant(watchQuery, change)
 
