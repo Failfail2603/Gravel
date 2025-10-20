@@ -35,8 +35,8 @@ async function test() {
       sort: {
         debitor: -1,
       },
-      skip: 0,
-      limit: 2,
+      skip: 2,
+      limit: 3,
       projection: {
         _id: 1,
         email: 1,

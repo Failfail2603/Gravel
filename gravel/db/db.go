@@ -18,7 +18,15 @@ type DBProvider interface {
 	StartChangeStream(natsResponseChanneldbUpdates chan types.DBChangeStreamEvent)
 	StopChangeStream()
 	TestFilterWithDocument(filterJSON string, document types.Document) (bool, error)
+	GetDocumentID(document types.Document) string
 	GetWatchedDocumentInfo(document types.Document, queryInformation types.QueryAnalysis) (types.WatchedDocument, error)
+
+	// returns the sorting order of two documents
+	// 1 if docInfoA is greater than docInfoB
+	// -1 if docInfoA is less than docInfoB
+	// 0 if they are equal
+	GetSortingOrder(docInfoA types.WatchedDocument, docInfoB types.WatchedDocument, queryInformation types.QueryAnalysis) int
+	GetNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int
 }
 
 type DBService struct {

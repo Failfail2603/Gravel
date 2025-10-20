@@ -7,6 +7,7 @@ import (
 
 type JSONPatch struct {
 	Op    string      `json:"op"`
+	From  string      `json:"from,omitempty"`
 	Path  string      `json:"path"`
 	Value interface{} `json:"value,omitempty"`
 }

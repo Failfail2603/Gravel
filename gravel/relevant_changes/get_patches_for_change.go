@@ -28,7 +28,6 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 
 	// get individual updates for change after we did basic checks as this can get quite heavy
 	change.Updates = ExtractFieldUpdates(change)
-	log.Printf("Extracted %d field updates from change event", len(change.Updates))
 
 	switch change.Operation {
 	case "update":

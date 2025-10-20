@@ -50,23 +50,11 @@ func (w *WatchQuery) IsExhaustedWindow() bool {
 }
 
 func (w *WatchQuery) SaveRemoveDocumentFromWindow(documentIndex int) {
-
-	// infinite windows do not have a document in the window
-	if w.IsInfiniteWindow() {
-		return
-	}
-
 	// remove the document from the window
 	w.WatchedDocuments = slices.Delete(w.WatchedDocuments, documentIndex, documentIndex+1)
 }
 
 func (w *WatchQuery) SaveAddDocumentToWindow(dbService *DBService, document types.Document, documentIndex int) {
-
-	// infinite windows do not have a document in the window
-	if w.IsInfiniteWindow() {
-		return
-	}
-
 	watchedDocument, err := dbService.Connection.GetWatchedDocumentInfo(document, w.QueryInformation)
 	if err != nil {
 		return
@@ -79,4 +67,27 @@ func (w *WatchQuery) SaveAddDocumentToWindow(dbService *DBService, document type
 	}
 
 	w.WatchedDocuments = slices.Insert(w.WatchedDocuments, documentIndex, watchedDocument)
+}
+
+func (w *WatchQuery) SaveMoveDocumentInWindow(oldIndex int, newIndex int) {
+	// nothing to do if indices are the same
+	if oldIndex == newIndex {
+		return
+	}
+
+	// save the document at the old index
+	document := w.WatchedDocuments[oldIndex]
+
+	// remove it from the old position
+	w.WatchedDocuments = slices.Delete(w.WatchedDocuments, oldIndex, oldIndex+1)
+
+	// adjust the new index if necessary
+	// when removing an element before the target position, all indices shift down by 1
+	adjustedNewIndex := newIndex
+	if oldIndex < newIndex {
+		adjustedNewIndex = newIndex - 1
+	}
+
+	// insert at the new position
+	w.WatchedDocuments = slices.Insert(w.WatchedDocuments, adjustedNewIndex, document)
 }

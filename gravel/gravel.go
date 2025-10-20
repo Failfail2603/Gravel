@@ -232,32 +232,28 @@ func (gravel *GravelServer) StartListening() {
 
 		// build watched document if the window is not infinite
 		watchedDocuments := []types.WatchedDocument{}
-		if !newWatchQuery.IsInfiniteWindow() {
 
-			// parse the result to documents
-			var documents []types.Document
-			if queryResult != nil && queryResult.Result != "" {
-				if err := json.Unmarshal([]byte(queryResult.Result), &documents); err != nil {
-					log.Printf("Failed to unmarshal query results to extract document IDs: %v", err)
-				}
+		// parse the result to documents
+		var documents []types.Document
+		if queryResult != nil && queryResult.Result != "" {
+			if err := json.Unmarshal([]byte(queryResult.Result), &documents); err != nil {
+				log.Printf("Failed to unmarshal query results to extract document IDs: %v", err)
+			}
+		}
+
+		for _, document := range documents {
+
+			watchedDocument, err := dbService.Connection.GetWatchedDocumentInfo(document, queryInformation)
+			if err != nil {
+				log.Printf("Failed to get watched document info: %v", err)
+				continue
 			}
 
-			for _, document := range documents {
-
-				watchedDocument, err := dbService.Connection.GetWatchedDocumentInfo(document, queryInformation)
-				if err != nil {
-					log.Printf("Failed to get watched document info: %v", err)
-					continue
-				}
-
-				watchedDocuments = append(watchedDocuments, watchedDocument)
-			}
+			watchedDocuments = append(watchedDocuments, watchedDocument)
 		}
 
 		newWatchQuery.WatchedDocuments = watchedDocuments
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
-
-		log.Printf("WatchedDocuments: %+v", watchedDocuments)
 
 		if shouldStartChangeStream {
 			dbService.UpdateChannel = make(chan types.DBChangeStreamEvent)

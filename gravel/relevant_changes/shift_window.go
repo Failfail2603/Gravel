@@ -42,14 +42,14 @@ func isWindowShiftApplicable(watchQuery *db.WatchQuery, dir ShiftDirection) bool
 	// 1. we have less documents than the limit -> the window is already exhausted and we cannot shift down
 	// 2. we have exactly the limit of documents at the end -> we cannot check this as we do not know if there are documents below
 	// this is the only edgecase where this function returns true but the window should not be shiftable. The shift function will need to check for this
-	if dir == ShiftDown && watchQuery.QueryInformation.WindowLimit == len(watchQuery.WatchedDocuments) {
+	if dir == ShiftDown && watchQuery.QueryInformation.WindowLimit != 0 && watchQuery.QueryInformation.WindowLimit == len(watchQuery.WatchedDocuments) {
 		return true
 	}
 
 	return false
 }
 
-func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, dir ShiftDirection) []json_patch.JSONPatch {
+func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDirection) []json_patch.JSONPatch {
 	patches := []json_patch.JSONPatch{}
 
 	// early exit if the window is not shiftable
@@ -67,13 +67,12 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *typ
 	newDocument := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, skip)
 
 	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
-	if newDocument == nil {
+	if len(newDocument) == 0 {
 		return patches
 	}
 
 	// make a patch to delete the document from the window in the end of the shift direction
 	removeIndex := 0
-
 	if dir == ShiftUp {
 		removeIndex = watchQuery.QueryInformation.WindowLimit - 1
 	}
@@ -96,7 +95,7 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *typ
 	addPatch := json_patch.JSONPatch{
 		Op:    "add",
 		Path:  fmt.Sprintf("/result/%s", addIndex),
-		Value: newDocument,
+		Value: newDocument[0],
 	}
 	patches = append(patches, addPatch)
 

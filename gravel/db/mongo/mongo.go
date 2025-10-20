@@ -294,9 +294,6 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				continue
 			}
 
-			test, _ := json.MarshalIndent(changeEvent, "", "  ")
-			log.Println("ChangeEvent", string(test))
-
 			// Extract full document (available for insert, update, replace operations)
 			var fullDocument interface{}
 			if fullDoc, exists := changeEvent["fullDocument"]; exists {
@@ -455,4 +452,21 @@ func (m *MongoProvider) GetWatchedDocumentInfo(document types.Document, queryInf
 		ID:         docID,
 		SortValues: sortValues,
 	}, nil
+}
+
+func (m *MongoProvider) GetSortingOrder(docInfoA types.WatchedDocument, docInfoB types.WatchedDocument, queryInformation types.QueryAnalysis) int {
+	return mongoSortingComparator(queryInformation.SortFields, docInfoA, docInfoB)
+}
+
+func (m *MongoProvider) GetDocumentID(document types.Document) string {
+	documentID, err := GetIDFromEntry(document)
+	if err != nil {
+		log.Printf("Failed to extract document ID: %v\n", err)
+		return ""
+	}
+	return documentID
+}
+
+func (m *MongoProvider) GetNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int {
+	return getNewPositionForDocument(documents, oldIndex, sortFields)
 }

@@ -2,7 +2,6 @@ package mongo
 
 import (
 	"gravel/types"
-	"log"
 	"math"
 	"strings"
 	"time"
@@ -13,16 +12,61 @@ import (
 func getSortValuesFromDocument(document types.Document, sortFields []types.SortField) []interface{} {
 	result := make([]interface{}, len(sortFields))
 
-	log.Printf("Document: %+v", document)
-	log.Printf("SortFields: %+v", sortFields)
-
 	for i, sortField := range sortFields {
 		result[i] = GetValueByPath(document, sortField.Field)
 	}
 
-	log.Printf("Result: %+v", result)
-
 	return result
+}
+
+func getNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int {
+	if oldIndex < 0 || oldIndex >= len(documents) {
+		return oldIndex // Invalid index, return as-is
+	}
+
+	doc := documents[oldIndex]
+
+	// Binary search to find the correct position
+	// We search in two parts: before oldIndex and after oldIndex
+
+	// First, check if we need to move at all by comparing with neighbors
+	if oldIndex > 0 && mongoSortingComparator(sortFields, doc, documents[oldIndex-1]) == 1 {
+		// Document should move left (toward lower indices)
+		// Binary search in range [0, oldIndex)
+		left := 0
+		right := oldIndex
+
+		for left < right {
+			mid := left + (right-left)/2
+			if mongoSortingComparator(sortFields, doc, documents[mid]) == 1 {
+				right = mid
+			} else {
+				left = mid + 1
+			}
+		}
+		return left
+	}
+
+	if oldIndex < len(documents)-1 && mongoSortingComparator(sortFields, doc, documents[oldIndex+1]) == -1 {
+		// Document should move right (toward higher indices)
+		// Binary search in range (oldIndex, len(documents)]
+		left := oldIndex + 1
+		right := len(documents)
+
+		for left < right {
+			mid := left + (right-left)/2
+			if mongoSortingComparator(sortFields, doc, documents[mid]) == -1 {
+				left = mid + 1
+			} else {
+				right = mid
+			}
+		}
+		// Since we're inserting after removal, adjust by -1
+		return left - 1
+	}
+
+	// Document is already in correct position
+	return oldIndex
 }
 
 // mongoSortingComparator compares two WatchedDocuments based on MongoDB sorting rules
@@ -30,6 +74,8 @@ func getSortValuesFromDocument(document types.Document, sortFields []types.SortF
 func mongoSortingComparator(sortFields []types.SortField, doc1 types.WatchedDocument, doc2 types.WatchedDocument) int {
 	// Compare each sort field in order
 	for i, sortField := range sortFields {
+
+		// TODO this should never happen as sorting should always be in the context of a single query
 		// Ensure we have sort values for both documents
 		if i >= len(doc1.SortValues) || i >= len(doc2.SortValues) {
 			// If one document has fewer values, treat it as less than
