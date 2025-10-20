@@ -429,9 +429,18 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 	})
 
 	// ======== analyze window ========
-	queryInformation.WindowStart = int(*findOptions.Skip)
-	queryInformation.WindowEnd = queryInformation.WindowStart + int(*findOptions.Limit)
-	queryInformation.WindowLimit = int(*findOptions.Limit)
+	skip := int64(0)
+	if findOptions.Skip != nil {
+		skip = *findOptions.Skip
+	}
+	limit := int64(0)
+	if findOptions.Limit != nil {
+		limit = *findOptions.Limit
+	}
+	
+	queryInformation.WindowStart = int(skip)
+	queryInformation.WindowEnd = queryInformation.WindowStart + int(limit)
+	queryInformation.WindowLimit = int(limit)
 
 	return queryInformation, nil
 }

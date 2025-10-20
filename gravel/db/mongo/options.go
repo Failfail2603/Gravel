@@ -23,6 +23,8 @@ func parseFindOptionsString(findOptionsString string) (options.FindOptions, erro
 		}
 		if skip, ok := optionsMap["skip"].(float64); ok {
 			findOptions.SetSkip(int64(skip))
+		} else {
+			findOptions.SetSkip(0)
 		}
 		if projection, ok := optionsMap["projection"].(map[string]interface{}); ok {
 			findOptions.SetProjection(projection)
