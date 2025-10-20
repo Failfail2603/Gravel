@@ -470,3 +470,9 @@ func (m *MongoProvider) GetDocumentID(document types.Document) string {
 func (m *MongoProvider) GetNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int {
 	return getNewPositionForDocument(documents, oldIndex, sortFields)
 }
+
+func (m *MongoProvider) GetPositionForDocumentInWindow(documents []types.WatchedDocument, document types.WatchedDocument, sortFields []types.SortField) int {
+	// append the document at the end of the documents and then call getNewPositionForDocument
+	appendedDocuments := append(documents, document)
+	return getNewPositionForDocument(appendedDocuments, len(appendedDocuments)-1, sortFields)
+}
