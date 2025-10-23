@@ -1,7 +1,6 @@
 package relevant_changes
 
 import (
-	"fmt"
 	"gravel/db"
 	"gravel/json_patch"
 	"gravel/types"
@@ -340,27 +339,39 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 		return patches
 	}
 
-	// update is inside the window
+	// update moves document inside the window
+	// we need to check from where the update is coming
+	patches := []json_patch.JSONPatch{}
+
+	// was the original document above the window
+	if !watchQuery.IsInfiniteWindow() && watchQuery.QueryInformation.WindowStart > 0 {
+		beforePositionRelativeToFirst, err := getPositionOfOldDocumentRelativeTo(dbService, watchQuery, change, 0)
+		if err != nil {
+			log.Printf("Error getting position of old document relative to first: %v", err)
+			return []json_patch.JSONPatch{}
+		}
+
+		// yes document comes from above window to inside the window
+		// in this case we do not delete the last one from our window but instead the first one as it should move up the curso
+		if beforePositionRelativeToFirst == 1 {
+			patches = append(patches, GetSimpleRemovePatch(0))
+			watchQuery.SaveRemoveDocumentFromWindow(0)
+		} else {
+			// in this case the document was below the window and comes from there. here we should delete the last one from the window
+			patches = append(patches, GetSimpleRemovePatch(-1))
+			watchQuery.SaveRemoveDocumentFromWindow(-1)
+		}
+	}
+
 	// get where the document should be inserted
 	newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
 
 	// get the document
 	newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowStart+newIndex)
 
-	fmt.Printf("New document: %+v\n", newDocuments[0])
-
-	patches := []json_patch.JSONPatch{}
 	// add the document at the correct position inside the window
 	patches = append(patches, GetSimpleAddPatch(newIndex, newDocuments[0]))
 	watchQuery.SaveAddDocumentToWindow(dbService, newDocuments[0], newIndex)
-
-	// remove the last document from the window if the query is limited
-	if watchQuery.IsInfiniteWindow() {
-		return patches
-	}
-
-	patches = append(patches, GetSimpleRemovePatch(-1))
-	watchQuery.SaveRemoveDocumentFromWindow(-1)
 
 	return patches
 }
