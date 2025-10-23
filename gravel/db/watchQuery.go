@@ -28,7 +28,7 @@ func (w *WatchQuery) IsInfiniteWindow() bool {
 	return w.QueryInformation.WindowEnd == 0 && w.QueryInformation.WindowStart == 0
 }
 
-func (w *WatchQuery) DocumentIsInWindow(documentId string) (bool, int) {
+func (w *WatchQuery) IsDocumentInWindow(documentId string) (bool, int) {
 	for i, watchedDocument := range w.WatchedDocuments {
 		if documentId == watchedDocument.ID {
 			return true, i

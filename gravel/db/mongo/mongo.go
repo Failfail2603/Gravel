@@ -240,7 +240,7 @@ func (m *MongoProvider) StartChangeStream(dbUpdates chan types.DBChangeStreamEve
 	// Create change stream options
 	opts := options.ChangeStream().
 		SetFullDocument(options.UpdateLookup).
-		SetFullDocumentBeforeChange(options.Required)
+		SetFullDocumentBeforeChange(options.WhenAvailable)
 
 	// Start change stream
 	changeStream, err := m.client.Watch(context.Background(), mongo.Pipeline{}, opts)

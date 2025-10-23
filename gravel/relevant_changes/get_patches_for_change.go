@@ -30,14 +30,12 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 
 	switch change.Operation {
 	case "update":
-
 		return GetUpdatePatches(dbService, watchQuery, change)
 	case "insert":
-
+		return GetInsertPatches(dbService, watchQuery, change)
 	case "delete":
-
+		return GetRemovePatches(dbService, watchQuery, change)
 	case "replace":
-
 	}
 
 	return []json_patch.JSONPatch{}
