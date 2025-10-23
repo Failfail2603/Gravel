@@ -365,7 +365,7 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 	return patches
 }
 
-func getFilteredAndUpdatedPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, update *types.FieldUpdate, updatedDocumentIsInWindow bool, documentIndex int) []json_patch.JSONPatch {
+func getFilteredAndSortedUpdatedPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, update *types.FieldUpdate, updatedDocumentIsInWindow bool, documentIndex int) []json_patch.JSONPatch {
 
 	doc := change.FullDocument
 
@@ -452,7 +452,7 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 		} else if !isFilteredField && isSortedField {
 			patches = getSimpleSortedUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
 		} else if isFilteredField && isSortedField {
-			patches = getFilteredAndUpdatedPatches(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
+			patches = getFilteredAndSortedUpdatedPatches(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
 		} else {
 			// ignore everything else
 			continue

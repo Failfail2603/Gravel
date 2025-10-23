@@ -111,17 +111,40 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 }
 
 func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, index int) []types.Document {
-	// unmarshal options
-	optionsMap := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(watchQuery.Options), &optionsMap); err != nil {
-		fmt.Printf("Failed to unmarshal find options: %v", err)
-		return nil
+	// Parse the original options preserving structure for fields we don't modify
+	var optionsRaw struct {
+		Sort       json.RawMessage        `json:"sort,omitempty"`
+		Projection json.RawMessage        `json:"projection,omitempty"`
+		Skip       *int                   `json:"skip,omitempty"`
+		Limit      *int                   `json:"limit,omitempty"`
+		Extra      map[string]interface{} `json:"-"`
 	}
 
-	// set the options up to only return one document
-	optionsMap["skip"] = index
-	optionsMap["limit"] = 1
-	optionsJSON, err := json.Marshal(optionsMap)
+	if watchQuery.Options != "" {
+		if err := json.Unmarshal([]byte(watchQuery.Options), &optionsRaw); err != nil {
+			fmt.Printf("Failed to unmarshal find options: %v", err)
+			return nil
+		}
+	}
+
+	// Build new options with modified skip and limit
+	newSkip := index
+	newLimit := 1
+
+	// Create new options struct preserving original fields
+	modifiedOptions := struct {
+		Sort       json.RawMessage `json:"sort,omitempty"`
+		Projection json.RawMessage `json:"projection,omitempty"`
+		Skip       int             `json:"skip"`
+		Limit      int             `json:"limit"`
+	}{
+		Sort:       optionsRaw.Sort,
+		Projection: optionsRaw.Projection,
+		Skip:       newSkip,
+		Limit:      newLimit,
+	}
+
+	optionsJSON, err := json.Marshal(modifiedOptions)
 	if err != nil {
 		fmt.Printf("Failed to marshal find options: %v", err)
 		return nil
