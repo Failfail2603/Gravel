@@ -379,13 +379,6 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				Timestamp:                time.Now(),
 			}
 
-			b, err := json.MarshalIndent(event, "", "  ")
-			if err != nil {
-				log.Printf("Error marshaling change event for %s: %v", mongoUrl, err)
-				continue
-			}
-			log.Printf("Change event for %s:\n%s", mongoUrl, string(b))
-
 			select {
 			case dbUpdates <- event:
 				// log.Printf("Sent change event for %s: %s", mongoUrl, operation)
@@ -426,7 +419,7 @@ func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document types
 		{{Key: "$match", Value: filter}},
 	}
 
-	log.Printf("Testing filter with aggregation pipeline")
+	log.Printf("Testing filter with aggregation pipeline: %v", pipeline)
 
 	// Execute the aggregation on any database (we use admin since we don't need a real collection)
 	// The $documents stage creates ephemeral data, so no collection access is needed
@@ -442,6 +435,8 @@ func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document types
 	if err := cursor.Err(); err != nil {
 		return false, fmt.Errorf("cursor error: %w", err)
 	}
+
+	log.Printf("Filter result: %v", hasResults)
 
 	if hasResults {
 		log.Printf("Filter successfully matched the document")
@@ -492,14 +487,21 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 	// Extract relevant fields from sort. we only need the keys here as sorting order is not relevant in this case
 	queryInformation.SortFields = extractSortFields(findOptions)
 
+	// append default sort by id if not present
+	if !slices.Contains(queryInformation.SortFields, types.SortField{
+		Field: "_id",
+		Order: -1,
+	}) {
+		queryInformation.SortFields = append(queryInformation.SortFields, types.SortField{
+			Field: "_id",
+			Order: -1,
+		})
+	}
+
+	log.Printf("Find Options sort: %+v\n", findOptions.Sort)
+
 	// debug print
 	log.Printf("SortFields: %+v\n", queryInformation.SortFields)
-
-	// append default sort by id
-	queryInformation.SortFields = append(queryInformation.SortFields, types.SortField{
-		Field: "_id",
-		Order: 1,
-	})
 
 	// ======== analyze window ========
 	skip := int64(0)

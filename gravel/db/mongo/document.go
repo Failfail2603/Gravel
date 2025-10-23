@@ -45,6 +45,11 @@ func GetValueByPath(doc types.Document, path string) interface{} {
 		current = value
 	}
 
+	// Convert ObjectID to string before returning
+	if objectID, isObjectID := current.(primitive.ObjectID); isObjectID {
+		return objectID.Hex()
+	}
+
 	return current
 }
 

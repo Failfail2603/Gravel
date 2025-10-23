@@ -293,7 +293,8 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 			return patches
 		}
 
-		return []json_patch.JSONPatch{}
+		// if we do not move the document we can just make a simple update statement for the value
+		return []json_patch.JSONPatch{getSimpleUpdatePatch(update, documentIndex)}
 
 	}
 

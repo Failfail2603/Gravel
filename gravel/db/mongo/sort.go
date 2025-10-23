@@ -95,7 +95,7 @@ func mongoSortingComparator(sortFields []types.SortField, doc1 types.WatchedDocu
 
 		// If values are different, apply sort order and return
 		if cmp != 0 {
-			if sortField.Order == -1 {
+			if sortField.Order == 1 {
 				return -cmp // Reverse for descending
 			}
 			return cmp

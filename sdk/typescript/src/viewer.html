@@ -12,7 +12,6 @@
         background-color: #f5f5f5;
       }
       .container {
-        max-width: 1400px;
         margin: 0 auto;
         background: white;
         padding: 20px;
@@ -40,7 +39,8 @@
         border: 1px solid #f5c6cb;
       }
       table {
-        width: 100%;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
         margin-top: 20px;
       }
@@ -49,6 +49,7 @@
         padding: 12px;
         text-align: left;
         border-bottom: 1px solid #ddd;
+        white-space: nowrap;
       }
       th {
         background-color: #4caf50;
@@ -82,20 +83,171 @@
         color: #666;
         margin-bottom: 10px;
       }
+      .comparison-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 20px;
+      }
+      .data-section {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        overflow-x: auto;
+        min-width: 0;
+      }
+      .data-section h2 {
+        margin-top: 0;
+        font-size: 18px;
+        color: #333;
+      }
+      .diff-highlight {
+        background-color: #fff3cd !important;
+        border-left: 3px solid #ffc107;
+      }
+      .diff-missing {
+        background-color: #f8d7da !important;
+        border-left: 3px solid #dc3545;
+      }
+      .diff-extra {
+        background-color: #d1ecf1 !important;
+        border-left: 3px solid #17a2b8;
+      }
+      .diff-summary {
+        background-color: #fff9e6;
+        border: 1px solid #ffc107;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 20px;
+        font-size: 14px;
+      }
+      .diff-summary strong {
+        color: #856404;
+      }
+      .controls {
+        margin-bottom: 20px;
+      }
+      .btn {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        font-size: 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn:hover {
+        background-color: #45a049;
+      }
+      .btn:active {
+        background-color: #3d8b40;
+      }
+      .btn:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+      }
+      .btn.secondary {
+        background-color: #2196f3;
+      }
+      .btn.secondary:hover {
+        background-color: #0b7dda;
+      }
+      .query-builder {
+        background-color: #f9f9f9;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 20px;
+      }
+      .query-builder h3 {
+        margin-top: 0;
+        font-size: 16px;
+        color: #333;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+        font-size: 14px;
+        color: #555;
+      }
+      .form-group textarea {
+        width: 100%;
+        min-height: 100px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-family: "Consolas", "Monaco", monospace;
+        font-size: 13px;
+        resize: vertical;
+        box-sizing: border-box;
+      }
+      .form-group textarea:focus {
+        outline: none;
+        border-color: #4caf50;
+      }
+      .btn-group {
+        display: flex;
+        gap: 10px;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <h1>🗄️ Gravel Real-Time Data Viewer</h1>
-      <div id="status" class="status connected">
-        Connected - Fetching data every second...
+      <div id="status" class="status connected">Ready to compare endpoints</div>
+
+      <!-- Query Builder Section -->
+      <div class="query-builder">
+        <h3>🔧 Query Builder</h3>
+        <div class="form-group">
+          <label for="queryInput">MongoDB Query (JSON):</label>
+          <textarea
+            id="queryInput"
+            placeholder='{"debitor": {"$lte": 10000}}'
+          ></textarea>
+        </div>
+        <div class="form-group">
+          <label for="optionsInput">Query Options (JSON):</label>
+          <textarea
+            id="optionsInput"
+            placeholder='{"sort": {"debitor": -1}, "limit": 20, "skip": 0, "projection": {"_id": 1, "email": 1}}'
+          ></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn secondary" onclick="loadCurrentQuery()">
+            📥 Load Current Query
+          </button>
+          <button class="btn" onclick="setQuery()">🚀 Apply Query</button>
+          <button class="btn" id="compareBtn" onclick="fetchData()">
+            Refetch
+          </button>
+        </div>
       </div>
+
       <div class="last-update" id="lastUpdate"></div>
-      <div id="tableContainer"></div>
+      <div id="diffSummary"></div>
+      <div class="comparison-container">
+        <div class="data-section">
+          <h2>Gravel</h2>
+          <div id="tableContainer1"></div>
+        </div>
+        <div class="data-section">
+          <h2>MongoDB</h2>
+          <div id="tableContainer2"></div>
+        </div>
+      </div>
     </div>
 
     <script>
-      let lastDataHash = "";
+      let lastDataHash1 = "";
+      let lastDataHash2 = "";
+      let currentData1 = null;
+      let currentData2 = null;
 
       function flattenObject(obj, prefix = "") {
         const flattened = {};
@@ -124,9 +276,73 @@
         return flattened;
       }
 
-      function createTable(data) {
-        console.log("Creating table with data:", data);
+      function compareData(data1, data2) {
+        const differences = [];
 
+        if (!data1 || !data2)
+          return { differences, message: "One or both datasets are null" };
+        if (!Array.isArray(data1) || !Array.isArray(data2)) {
+          return {
+            differences,
+            message: "One or both datasets are not arrays",
+          };
+        }
+
+        const len1 = data1.length;
+        const len2 = data2.length;
+
+        if (len1 !== len2) {
+          differences.push(
+            `Different array lengths: /data has ${len1} items, /simplequery has ${len2} items`,
+          );
+        }
+
+        const maxLen = Math.max(len1, len2);
+
+        for (let i = 0; i < maxLen; i++) {
+          const item1 = i < len1 ? data1[i] : null;
+          const item2 = i < len2 ? data2[i] : null;
+
+          if (!item1) {
+            differences.push(
+              `Row ${i}: Missing in /data but exists in /simplequery`,
+            );
+          } else if (!item2) {
+            differences.push(
+              `Row ${i}: Missing in /simplequery but exists in /data`,
+            );
+          } else {
+            const flat1 = flattenObject(item1);
+            const flat2 = flattenObject(item2);
+
+            const allKeys = new Set([
+              ...Object.keys(flat1),
+              ...Object.keys(flat2),
+            ]);
+
+            for (const key of allKeys) {
+              const val1 = flat1[key];
+              const val2 = flat2[key];
+
+              if (val1 !== val2) {
+                differences.push(
+                  `Row ${i}, Field "${key}": /data="${val1}" vs /simplequery="${val2}"`,
+                );
+              }
+            }
+          }
+        }
+
+        return {
+          differences,
+          message:
+            differences.length === 0
+              ? "Data is identical! ✅"
+              : `Found ${differences.length} difference(s)`,
+        };
+      }
+
+      function createTable(data, sourceEndpoint) {
         if (!data) {
           return '<div class="empty-state">No data received (null or undefined)</div>';
         }
@@ -145,7 +361,6 @@
 
         // Flatten all objects
         const flattenedData = data.map((item) => flattenObject(item));
-        console.log("Flattened data:", flattenedData);
 
         // Get all unique keys across all objects
         const allKeys = new Set();
@@ -153,8 +368,7 @@
           Object.keys(item).forEach((key) => allKeys.add(key));
         });
 
-        const headers = Array.from(allKeys);
-        console.log("Table headers:", headers);
+        const headers = Array.from(allKeys).sort();
 
         if (headers.length === 0) {
           return '<div class="empty-state">No fields found in data</div>';
@@ -195,30 +409,58 @@
 
       async function fetchData() {
         try {
-          const response = await fetch("/data");
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+          // Fetch from both endpoints
+          const [response1, response2] = await Promise.all([
+            fetch("/data"),
+            fetch("/simplequery"),
+          ]);
+
+          if (!response1.ok) {
+            throw new Error(`/data error! status: ${response1.status}`);
           }
-          const data = await response.json();
+          if (!response2.ok) {
+            throw new Error(`/simplequery error! status: ${response2.status}`);
+          }
 
-          // Debug: Log received data
-          console.log("Received data:", data);
-          console.log("Data type:", typeof data);
-          console.log("Is array:", Array.isArray(data));
+          const data1 = await response1.json();
+          const data2 = (await response2.json()).result;
 
-          // Check if data has changed
-          const dataHash = JSON.stringify(data);
-          if (dataHash !== lastDataHash) {
-            lastDataHash = dataHash;
-            document.getElementById("tableContainer").innerHTML =
-              createTable(data);
-            updateLastUpdate();
+          // Always update tables with current data
+          document.getElementById("tableContainer1").innerHTML = createTable(
+            data1,
+            "/data",
+          );
+          document.getElementById("tableContainer2").innerHTML = createTable(
+            data2,
+            "/simplequery",
+          );
+
+          updateLastUpdate();
+
+          // Compare the two endpoints against each other
+          const comparison = compareData(data1, data2);
+          console.log("Comparison result:", comparison);
+          const diffSummaryEl = document.getElementById("diffSummary");
+
+          if (comparison.differences.length === 0) {
+            diffSummaryEl.innerHTML = `<div class="diff-summary" style="background-color: #d4edda; border-color: #28a745;"><strong>✅ ${comparison.message}</strong></div>`;
+          } else {
+            let diffHtml = `<div class="diff-summary"><strong>⚠️ ${comparison.message}:</strong><ul style="margin: 10px 0 0 0; padding-left: 20px;">`;
+            comparison.differences.slice(0, 10).forEach((diff) => {
+              diffHtml += `<li>${escapeHtml(diff)}</li>`;
+            });
+            if (comparison.differences.length > 10) {
+              diffHtml += `<li><em>... and ${
+                comparison.differences.length - 10
+              } more difference(s)</em></li>`;
+            }
+            diffHtml += `</ul></div>`;
+            diffSummaryEl.innerHTML = diffHtml;
           }
 
           // Update status
           document.getElementById("status").className = "status connected";
-          document.getElementById("status").textContent =
-            "Connected - Fetching data every second...";
+          document.getElementById("status").textContent = "Comparison complete";
         } catch (error) {
           console.error("Error fetching data:", error);
           document.getElementById("status").className = "status error";
@@ -228,11 +470,102 @@
         }
       }
 
-      // Initial fetch
-      fetchData();
+      // Load current query from server
+      async function loadCurrentQuery() {
+        try {
+          const response = await fetch("/getquery");
+          const data = await response.json();
 
-      // Fetch data every second
-      setInterval(fetchData, 1000);
+          document.getElementById("queryInput").value = JSON.stringify(
+            data.query,
+            null,
+            2,
+          );
+          document.getElementById("optionsInput").value = JSON.stringify(
+            data.options,
+            null,
+            2,
+          );
+
+          document.getElementById("status").className = "status connected";
+          document.getElementById("status").textContent =
+            "Current query loaded successfully";
+        } catch (error) {
+          console.error("Error loading query:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error loading query: ${error.message}`;
+        }
+      }
+
+      // Set new query on server
+      async function setQuery() {
+        try {
+          const queryText = document.getElementById("queryInput").value.trim();
+          const optionsText = document
+            .getElementById("optionsInput")
+            .value.trim();
+
+          // Parse JSON
+          let query = {};
+          let options = {};
+
+          if (queryText) {
+            try {
+              query = JSON.parse(queryText);
+            } catch (e) {
+              throw new Error("Invalid JSON in query field: " + e.message);
+            }
+          }
+
+          if (optionsText) {
+            try {
+              options = JSON.parse(optionsText);
+            } catch (e) {
+              throw new Error("Invalid JSON in options field: " + e.message);
+            }
+          }
+
+          // Send to server
+          document.getElementById("status").className = "status connected";
+          document.getElementById("status").textContent = "Applying query...";
+
+          const response = await fetch("/setquery", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query, options }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Failed to set query");
+          }
+
+          const result = await response.json();
+
+          document.getElementById("status").className = "status connected";
+          document.getElementById("status").textContent =
+            "Query applied successfully! ✅";
+
+          // Auto-fetch data after setting query
+          setTimeout(() => {
+            fetchData();
+          }, 500);
+        } catch (error) {
+          console.error("Error setting query:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error: ${error.message}`;
+        }
+      }
+
+      // Load current query on page load
+      loadCurrentQuery();
+      fetchData();
     </script>
   </body>
 </html>
