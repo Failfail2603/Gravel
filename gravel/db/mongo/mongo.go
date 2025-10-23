@@ -76,7 +76,68 @@ func (m *MongoProvider) Connect() error {
 	}
 
 	m.client = client
+
+	// Enable pre and post images for change streams at cluster level
+	command := bson.D{
+		{Key: "setClusterParameter", Value: bson.D{
+			{Key: "changeStreamOptions", Value: bson.D{
+				{Key: "preAndPostImages", Value: bson.D{
+					{Key: "expireAfterSeconds", Value: 10},
+				}},
+			}},
+		}},
+	}
+
+	var result bson.M
+	if err := client.Database("admin").RunCommand(ctx, command).Decode(&result); err != nil {
+		log.Printf("Warning: Failed to set changeStreamOptions cluster parameter: %v", err)
+		log.Println("Pre and post images may not be available. This is expected if not running as a replica set.")
+	} else {
+		log.Println("Successfully configured pre and post images for change streams at cluster level")
+
+		// Enable pre and post images on all collections in the database
+		if err := m.enablePrePostImagesOnCollections(client, ctx); err != nil {
+			log.Printf("Warning: Failed to enable pre and post images on collections: %v", err)
+		}
+	}
+
 	log.Println("Connected to MongoDB successfully")
+	return nil
+}
+
+// enablePrePostImagesOnCollections enables pre and post images on all collections in the database
+func (m *MongoProvider) enablePrePostImagesOnCollections(client *mongo.Client, ctx context.Context) error {
+	// Get list of collections in the database
+	db := client.Database(m.DatabaseName)
+	collections, err := db.ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		return fmt.Errorf("failed to list collections: %w", err)
+	}
+
+	log.Printf("Enabling pre and post images on %d collections in database '%s'", len(collections), m.DatabaseName)
+
+	// Enable pre and post images on each collection
+	for _, collName := range collections {
+		// Skip system collections
+		if strings.HasPrefix(collName, "system.") {
+			continue
+		}
+
+		collModCmd := bson.D{
+			{Key: "collMod", Value: collName},
+			{Key: "changeStreamPreAndPostImages", Value: bson.D{
+				{Key: "enabled", Value: true},
+			}},
+		}
+
+		var collModResult bson.M
+		if err := db.RunCommand(ctx, collModCmd).Decode(&collModResult); err != nil {
+			log.Printf("Warning: Failed to enable pre/post images on collection '%s': %v", collName, err)
+			continue
+		}
+		log.Printf("Enabled pre and post images on collection '%s'", collName)
+	}
+
 	return nil
 }
 
@@ -134,8 +195,6 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 		log.Printf("Cursor error: %v", err)
 		return nil
 	}
-
-	log.Printf("Query executed successfully, returned %d documents", len(results))
 	return results
 }
 
@@ -179,7 +238,9 @@ func (m *MongoProvider) StartChangeStream(dbUpdates chan types.DBChangeStreamEve
 	}
 
 	// Create change stream options
-	opts := options.ChangeStream().SetFullDocument(options.UpdateLookup)
+	opts := options.ChangeStream().
+		SetFullDocument(options.UpdateLookup).
+		SetFullDocumentBeforeChange(options.Required)
 
 	// Start change stream
 	changeStream, err := m.client.Watch(context.Background(), mongo.Pipeline{}, opts)
@@ -300,16 +361,30 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				fullDocument = fullDoc
 			}
 
+			// Extract full document before change (pre-image, available when enabled)
+			var fullDocumentBeforeChange interface{}
+			if preImage, exists := changeEvent["fullDocumentBeforeChange"]; exists {
+				fullDocumentBeforeChange = preImage
+			}
+
 			// Create and send change event
 			event := types.DBChangeStreamEvent{
-				Database:     mongoUrl,
-				Operation:    operation,
-				ID:           id,
-				Collection:   collection,
-				FullUpdate:   changeEvent,
-				FullDocument: fullDocument,
-				Timestamp:    time.Now(),
+				Database:                 mongoUrl,
+				Operation:                operation,
+				ID:                       id,
+				Collection:               collection,
+				FullUpdate:               changeEvent,
+				FullDocument:             fullDocument,
+				FullDocumentBeforeChange: fullDocumentBeforeChange,
+				Timestamp:                time.Now(),
 			}
+
+			b, err := json.MarshalIndent(event, "", "  ")
+			if err != nil {
+				log.Printf("Error marshaling change event for %s: %v", mongoUrl, err)
+				continue
+			}
+			log.Printf("Change event for %s:\n%s", mongoUrl, string(b))
 
 			select {
 			case dbUpdates <- event:
@@ -317,8 +392,6 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			case <-stopChan:
 				log.Printf("Change stream for %s stopped while sending event", mongoUrl)
 				return
-			default:
-				log.Printf("Channel blocked, dropping change event for %s", mongoUrl)
 			}
 		}
 	}
@@ -437,7 +510,7 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 	if findOptions.Limit != nil {
 		limit = *findOptions.Limit
 	}
-	
+
 	queryInformation.WindowStart = int(skip)
 	queryInformation.WindowEnd = queryInformation.WindowStart + int(limit)
 	queryInformation.WindowLimit = int(limit)

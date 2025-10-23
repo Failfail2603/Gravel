@@ -273,8 +273,15 @@ export async function generateMongoProvider(
         return;
       }
 
+      console.log(
+        "Received initial query result for client",
+        clientID,
+        Buffer.from(msg.data).toString("utf-8"),
+        // msg.data.toString(),
+      );
+
       const response = JSON.parse(
-        msg.data.toString(),
+        Buffer.from(msg.data).toString("utf-8"),
       ) as GravelMongoWatchQueryResponse;
 
       // get the queries which should be updated

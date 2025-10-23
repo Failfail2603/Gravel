@@ -29,13 +29,14 @@ async function test() {
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
     "users",
     {
-      email: /keep/,
+      debitor: { $lte: 10000 },
     },
     {
       sort: {
         debitor: -1,
       },
-
+      limit: 20,
+      skip: 20,
       projection: {
         _id: 1,
         email: 1,
@@ -86,8 +87,8 @@ async function test() {
     );
     currentData = patchResult.newDocument;
 
-    console.log("Updated Array after applying patches:");
-    console.log(JSON.stringify(currentData, null, 2));
+    // console.log("Updated Array after applying patches:");
+    // console.log(JSON.stringify(currentData, null, 2));
   });
 
   // Handle Ctrl+C gracefully

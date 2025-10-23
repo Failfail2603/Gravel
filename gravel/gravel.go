@@ -72,7 +72,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQue
 	channelName := "gravel.mongo.initial." + req.ClientID
 	gravel.natsConnection.Publish(channelName, string(responseJSON))
 
-	log.Printf("Query results sent to client %s on channel %s", req.ClientID, channelName)
+	log.Printf("Query results sent to client %s on channel %s with %d bytes", req.ClientID, channelName, len(responseJSON))
 
 	return &response, nil
 }

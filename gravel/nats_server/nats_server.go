@@ -53,8 +53,10 @@ func StartNatsServer() (*NatsConnection, error) {
 	}
 
 	opts := &server.Options{
-		Host: host,
-		Port: port,
+		Host:       host,
+		Port:       port,
+		MaxPayload: 64 * 1024 * 1024, // 64MB
+
 	}
 
 	natsInterface.natsServer, err = server.NewServer(opts)

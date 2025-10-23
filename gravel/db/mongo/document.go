@@ -3,7 +3,6 @@ package mongo
 import (
 	"fmt"
 	"gravel/types"
-	"log"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -16,12 +15,7 @@ func GetValueByPath(doc types.Document, path string) interface{} {
 	// Split the path by dots
 	keys := strings.Split(path, ".")
 
-	log.Printf("Path: %s", path)
-	log.Printf("Keys: %+v", keys)
-
 	var current interface{} = doc
-
-	log.Printf("Current: %+v", current)
 
 	// Navigate through the nested structure
 	for _, key := range keys {

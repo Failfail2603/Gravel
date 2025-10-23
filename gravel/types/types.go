@@ -11,14 +11,15 @@ type FieldUpdate struct {
 
 // DBChangeStreamEvent represents a database change event
 type DBChangeStreamEvent struct {
-	Database     string        `json:"database"`
-	Collection   string        `json:"collection"`
-	Operation    string        `json:"operation"`
-	ID           string        `json:"id"`
-	FullUpdate   interface{}   `json:"document"`
-	FullDocument interface{}   `json:"fullDocument"` // The complete document after the change (for insert/update/replace)
-	Timestamp    time.Time     `json:"timestamp"`
-	Updates      []FieldUpdate `json:"updates"` // Individual field changes extracted from the change event
+	Database                 string        `json:"database"`
+	Collection               string        `json:"collection"`
+	Operation                string        `json:"operation"`
+	ID                       string        `json:"id"`
+	FullUpdate               interface{}   `json:"document"`
+	FullDocument             interface{}   `json:"fullDocument"`             // The complete document after the change (for insert/update/replace)
+	FullDocumentBeforeChange interface{}   `json:"fullDocumentBeforeChange"` // The complete document before the change (pre-image)
+	Timestamp                time.Time     `json:"timestamp"`
+	Updates                  []FieldUpdate `json:"updates"` // Individual field changes extracted from the change event
 }
 
 // DatabaseConnectRequest represents a request to connect to a database

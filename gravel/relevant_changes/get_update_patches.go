@@ -69,6 +69,75 @@ func getSimpleMovePatch(documentIndex int, newPosition int) json_patch.JSONPatch
 	}
 }
 
+func removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService *db.DBService, watchQuery *db.WatchQuery, documentIndex int) []json_patch.JSONPatch {
+	patches := []json_patch.JSONPatch{}
+	wasExhaustedWindow := watchQuery.IsExhaustedWindow()
+
+	// add a patch which removes the document from the window and remove the index from the watched document ids
+	patches = append(patches, GetSimpleRemovePatch(documentIndex))
+	watchQuery.SaveRemoveDocumentFromWindow(documentIndex)
+
+	// check if query window is exhausted. if yes we do not need to query for a new document as there cannot be any new document
+	if wasExhaustedWindow {
+		return patches
+	}
+
+	// add a patch which adds the document to the window
+
+	// as the document would fall out of the query we can simply query for the new end of the window
+	// as window end is pointing one higher than the last document we need to query the document before
+	newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowEnd-1)
+
+	// we already checked if the window was exhausted before, but if we are exactly at the end of the window we cannot detemrine exhaustion by length of watched _ids. In this case the newDocument will be nil
+	if len(newDocuments) == 0 {
+		return patches
+	}
+
+	// add the new document at the end of the array
+	patches = append(patches, GetSimpleAddPatch(-1, newDocuments[0]))
+
+	watchQuery.SaveAddDocumentToWindow(dbService, newDocuments[0], -1)
+
+	return patches
+}
+
+func checkShiftWindowOnDocumentRemovedAboveWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, updateMatched bool, updateInWindow bool) []json_patch.JSONPatch {
+	// document does not match anymore and was not in window and we are also not at the start of the operation
+	if !updateMatched && !updateInWindow && isWindowShiftApplicable(watchQuery, ShiftUp) {
+
+		// check if old document was in the cursor
+		oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+		if err != nil {
+			log.Printf("Error testing filter: %v", err)
+			return []json_patch.JSONPatch{}
+		}
+
+		// if the new one did not match and the old one also did not match we can disregard it
+		if !oldMatched {
+			return []json_patch.JSONPatch{}
+		}
+
+		// here we know that we have documents above the window
+		// get the old relative position to the first document in the window
+		beforePositionRelativeToFirst, err := getPositionOfOldDocumentRelativeTo(dbService, watchQuery, change, 0)
+		if err != nil {
+			log.Printf("Error getting position of old document relative to first: %v", err)
+			return []json_patch.JSONPatch{}
+		}
+
+		//if the update is below the first one we are sure it is also below the window in general as an earlier case handled it being inside the window
+		if beforePositionRelativeToFirst == -1 {
+			return []json_patch.JSONPatch{}
+		}
+
+		// at this point we know that an document does not match anymore
+		patches := ShiftWindow(dbService, watchQuery, ShiftDown)
+		return patches
+	}
+
+	return []json_patch.JSONPatch{}
+}
+
 func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, update *types.FieldUpdate, isDocumentInWindow bool, documentIndex int) []json_patch.JSONPatch {
 
 	doc := change.FullDocument
@@ -88,70 +157,61 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 	// updated document is not in window anymore
 	// we need to remove it and add a new document if there is one
 	if !matched && isDocumentInWindow {
+		return removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex)
+	}
+
+	// updated document matches now is not in window and needs to be inserted
+	// get the positions for an insert
+	// update is inside the window
+	// get where the document should be inserted
+	if matched && !isDocumentInWindow {
+
+		// retrieve the document info so we can see the sorted fields
+		documentInfo, err := dbService.Connection.GetWatchedDocumentInfo(types.Document(doc.(primitive.M)), watchQuery.QueryInformation)
+		if err != nil {
+			log.Printf("Error getting watched document info: %v", err)
+			return []json_patch.JSONPatch{}
+		}
+
+		newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
+
+		// get the document
+		newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowStart+newIndex)
+
 		patches := []json_patch.JSONPatch{}
+		// add the document at the correct position inside the window
+		patches = append(patches, GetSimpleAddPatch(newIndex, newDocuments[0]))
+		watchQuery.SaveAddDocumentToWindow(dbService, newDocuments[0], newIndex)
 
-		wasExhaustedWindow := watchQuery.IsExhaustedWindow()
-
-		// add a patch which removes the document from the window and remove the index from the watched document ids
-		patches = append(patches, GetSimpleRemovePatch(documentIndex))
-		watchQuery.SaveRemoveDocumentFromWindow(documentIndex)
-
-		// check if query window is exhausted. if yes we do not need to query for a new document as there cannot be any new document
-		if wasExhaustedWindow {
+		// remove the last document from the window if the query is limited
+		if watchQuery.IsInfiniteWindow() {
 			return patches
 		}
 
-		// add a patch which adds the document to the window
-
-		// as the document would fall out of the query we can simply query for the new end of the window
-		// as window end is pointing one higher than the last document we need to query the document before
-		newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowEnd-1)
-
-		// we already checked if the window was exhausted before, but if we are exactly at the end of the window we cannot detemrine exhaustion by length of watched _ids. In this case the newDocument will be nil
-		if len(newDocuments) == 0 {
-			return patches
-		}
-
-		// add the new document at the end of the array
-		patches = append(patches, GetSimpleAddPatch(-1, newDocuments[0]))
-
-		watchQuery.SaveAddDocumentToWindow(dbService, newDocuments[0], -1)
+		patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+		watchQuery.SaveRemoveDocumentFromWindow(len(watchQuery.WatchedDocuments) - 1)
 
 		return patches
-
 	}
 
 	// updated document is not in window and does not match the filter
 	// we need to check if the document previously was above the window
 	// if yes we need to shift the window up
-	if !matched && !isDocumentInWindow {
-		// as this needs a database call we do prechecks to see if the document could even possibly be above the window before the change
-		// check if we could even shift the window before checking if we need to. If not we can ignore the update
-		if !isWindowShiftApplicable(watchQuery, ShiftUp) {
-			return []json_patch.JSONPatch{}
-		}
+	return checkShiftWindowOnDocumentRemovedAboveWindow(dbService, watchQuery, change, matched, isDocumentInWindow)
 
-		// if a window shift up is possible we need to check if the document was above the window
-		// we do this by querying the first document in the window and checking the index
-		firstDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowStart)
+}
 
-		// check if a document was found
-		if len(firstDocuments) == 0 {
-			log.Printf("Tried to get the first document in the window but no document was found!")
-			return []json_patch.JSONPatch{}
-		}
-
-		// if the first document is the same document on index 0 we do not have a change above the window
-		if dbService.Connection.GetDocumentID(firstDocuments[0]) == watchQuery.WatchedDocuments[0].ID {
-			return []json_patch.JSONPatch{}
-		}
-
-		// if the first document of the window is not the same anymore we need to shift the window down so we still do the correct skip
-		return ShiftWindow(dbService, watchQuery, ShiftDown)
+func getPositionOfOldDocumentRelativeTo(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, relativeTo int) (int, error) {
+	beforeDocumentInfo, err := dbService.Connection.GetWatchedDocumentInfo(types.Document(change.FullDocumentBeforeChange.(primitive.M)), watchQuery.QueryInformation)
+	if err != nil {
+		log.Printf("Error getting watched document info: %v", err)
+		return -1, err
 	}
 
-	return []json_patch.JSONPatch{}
+	// was the document before the change above the window?
+	beforePositionRelativeToFirst := dbService.Connection.GetSortingOrder(beforeDocumentInfo, watchQuery.WatchedDocuments[relativeTo], watchQuery.QueryInformation)
 
+	return beforePositionRelativeToFirst, nil
 }
 
 func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, update *types.FieldUpdate, isDocumentInWindow bool, documentIndex int) []json_patch.JSONPatch {
@@ -239,16 +299,16 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 
 	// update is outside of window and above the window
 	if positionRelativeToFirst == 1 {
-		// we need to check if the update moved a document above the window
-		newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowStart)
 
-		// if there are no documents we have a problem as there should be atleast the same document
-		if len(newDocuments) == 0 {
+		// was the document before the change above the window?
+		beforePositionRelativeToFirst, err := getPositionOfOldDocumentRelativeTo(dbService, watchQuery, change, 0)
+		if err != nil {
+			log.Printf("Error getting position of old document relative to first: %v", err)
 			return []json_patch.JSONPatch{}
 		}
 
-		// if we got the same document the change did not change any order around or in the window so we can ignore it
-		if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[0].ID {
+		// if the update is above and the document was also above the window we can ignore it
+		if beforePositionRelativeToFirst == 1 {
 			return []json_patch.JSONPatch{}
 		}
 
@@ -262,15 +322,15 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 	// update is outside of window and below the window
 	if positionRelativeToLast == -1 {
 		// we need to check if the update moved a document below the window
-		newDocuments := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, watchQuery.QueryInformation.WindowEnd-1)
-
-		// if there are no documents we have a problem as there should be atleast the same document
-		if len(newDocuments) == 0 {
+		// retrieve the document info so we can see the sorted fields
+		beforePositionRelativeToLast, err := getPositionOfOldDocumentRelativeTo(dbService, watchQuery, change, len(watchQuery.WatchedDocuments)-1)
+		if err != nil {
+			log.Printf("Error getting position of old document relative to last: %v", err)
 			return []json_patch.JSONPatch{}
 		}
 
-		// if we got the same document the change did not change any order around or in the window so we can ignore it
-		if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[len(watchQuery.WatchedDocuments)-1].ID {
+		// if the update is above and the document was also above the window we can ignore it
+		if beforePositionRelativeToLast == -1 {
 			return []json_patch.JSONPatch{}
 		}
 
@@ -298,10 +358,35 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 		return patches
 	}
 
-	patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
-	watchQuery.SaveRemoveDocumentFromWindow(len(watchQuery.WatchedDocuments) - 1)
+	patches = append(patches, GetSimpleRemovePatch(-1))
+	watchQuery.SaveRemoveDocumentFromWindow(-1)
 
 	return patches
+}
+
+func getFilteredAndUpdatedPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, update *types.FieldUpdate, updatedDocumentIsInWindow bool, documentIndex int) []json_patch.JSONPatch {
+
+	doc := change.FullDocument
+
+	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(doc.(primitive.M)))
+	if err != nil {
+		log.Printf("Error testing filter: %v", err)
+		return []json_patch.JSONPatch{}
+	}
+
+	// matched
+	if matched {
+		return getSimpleSortedUpdatePatch(dbService, watchQuery, change, update, updatedDocumentIsInWindow, documentIndex)
+	}
+
+	// document does not match anymore and was in window -> remove and get new one
+	if !matched && updatedDocumentIsInWindow {
+		return removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex)
+	}
+
+	// if the document did not match and is not inside the window we can try a shift down if the document
+	// the function checks this internalls
+	return checkShiftWindowOnDocumentRemovedAboveWindow(dbService, watchQuery, change, matched, updatedDocumentIsInWindow)
 }
 
 // optimizePatches removes redundant patches from the list
@@ -357,20 +442,19 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 		isFilteredField := IsFilteredField(watchQuery, &update)
 		isSortedField := IsSortedField(watchQuery, &update)
 
-		fmt.Printf("IsProjectedField: %v\n", isProjectedField)
-		fmt.Printf("IsFilteredField: %v\n", isFilteredField)
-		fmt.Printf("IsSortedField: %v\n", isSortedField)
-
 		// check if the field is projected but not filtered or sorted
 		// in this case we can simply check if the field is in the window and as nothing to this will change we can give back a simple update patch
 		if isProjectedField && !isFilteredField && !isSortedField && updatedDocumentIsInWindow {
-			patches = append(patches, getSimpleUpdatePatch(&update, documentIndex))
+			patches = []json_patch.JSONPatch{getSimpleUpdatePatch(&update, documentIndex)}
 		} else if isFilteredField && !isSortedField {
-			patches = append(patches, getSimpleFilteredUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)...)
+			patches = getSimpleFilteredUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
 		} else if !isFilteredField && isSortedField {
-			patches = append(patches, getSimpleSortedUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)...)
+			patches = getSimpleSortedUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
+		} else if isFilteredField && isSortedField {
+			patches = getFilteredAndUpdatedPatches(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
 		} else {
-			log.Printf("Not implemented for both filtered and sorted")
+			// ignore everything else
+			continue
 		}
 
 	}

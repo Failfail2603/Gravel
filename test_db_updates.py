@@ -125,7 +125,7 @@ def update_random_users_periodically(db, interval_seconds):
                 try:
                     # Randomly choose what to update
                     update_type = random.choice(
-                        ["email", "birthday", "debitor"])
+                        ["email", "debitor"])
 
                     if update_type == "email":
                         new_data = {"email": fake.email()}

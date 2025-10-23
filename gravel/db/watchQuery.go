@@ -50,6 +50,11 @@ func (w *WatchQuery) IsExhaustedWindow() bool {
 }
 
 func (w *WatchQuery) SaveRemoveDocumentFromWindow(documentIndex int) {
+	// if -1 is passed we remove the last document
+	if documentIndex == -1 {
+		documentIndex = len(w.WatchedDocuments) - 1
+	}
+
 	// remove the document from the window
 	w.WatchedDocuments = slices.Delete(w.WatchedDocuments, documentIndex, documentIndex+1)
 }

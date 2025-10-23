@@ -118,12 +118,9 @@ func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.Wa
 		return nil
 	}
 
-	fmt.Printf("Options for single retrieve: %+v\n", watchQuery.QueryInformation)
-
 	// set the options up to only return one document
 	optionsMap["skip"] = index
 	optionsMap["limit"] = 1
-	fmt.Printf("Options for single retrieve: %+v\n", optionsMap)
 	optionsJSON, err := json.Marshal(optionsMap)
 	if err != nil {
 		fmt.Printf("Failed to marshal find options: %v", err)
