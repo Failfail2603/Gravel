@@ -28,7 +28,7 @@ type DBProvider interface {
 	GetSortingOrder(docInfoA types.WatchedDocument, docInfoB types.WatchedDocument, queryInformation types.QueryAnalysis) int
 	GetNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int
 	GetPositionForDocumentInWindow(documents []types.WatchedDocument, document types.WatchedDocument, sortFields []types.SortField) int
-	ProjectDocument(document types.Document, options string) (types.Document, error)
+	ProjectDocument(document types.Document, options string, nestedPath string) (types.Document, error)
 }
 
 type DBService struct {

@@ -262,12 +262,12 @@ func (gravel *GravelServer) StartListening() {
 			for update := range dbService.UpdateChannel {
 
 				start := time.Now()
-
+				log.Println("")
 				log.Println("Calculated Update for", update.ID)
 				patches := relevant_changes.GetPatchesForChange(dbService, &newWatchQuery, &update)
+				log.Println("Patches len", len(patches))
 				end := time.Now()
-				fmt.Println("Calculated Update took ", end.Sub(start).String())
-				log.Println("")
+				log.Println("Calculated Update took ", end.Sub(start).String())
 
 				// check if the update is relevant for the watchquery
 				if len(patches) == 0 {

@@ -5,15 +5,33 @@ import (
 	"gravel/json_patch"
 	"gravel/types"
 	"log"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func getSimpleUpdatePatch(update *types.FieldUpdate, documentIndex int) json_patch.JSONPatch {
+func getSimpleUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, update *types.FieldUpdate, documentIndex int) json_patch.JSONPatch {
+	// as a value can be a nested object we need to project it according to the projection in the watchquery
+	// check if the update value is an objects versus a primitive value
+	value := update.Value
+	log.Printf("update value: %v", update.Value)
+	if mapVal, ok := update.Value.(map[string]interface{}); ok {
+		log.Println("found object in patched value")
+		value, _ = dbService.Connection.ProjectDocument(types.Document(mapVal), watchQuery.Options, update.Field)
+	} else {
+		log.Println("found primitive in patched value")
+	}
+
+	// as the path is dot separated we need to replace the dots with slashes
+	path := update.Field
+	for strings.Contains(path, ".") {
+		path = strings.Replace(path, ".", "/", -1)
+	}
+
 	return json_patch.JSONPatch{
 		Op:    "replace",
-		Path:  json_patch.GetBasePatchPath(documentIndex) + "/" + update.Field,
-		Value: update.Value,
+		Path:  json_patch.GetBasePatchPath(documentIndex) + "/" + path,
+		Value: value,
 	}
 }
 
@@ -110,7 +128,7 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 	// filter still matches and object is in window
 	if matched && isDocumentInWindow {
 		log.Println("Only Filtered, matched and in Window")
-		return []json_patch.JSONPatch{getSimpleUpdatePatch(update, documentIndex)}
+		return []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex)}
 	}
 
 	// filter does not longer match
@@ -203,7 +221,7 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 			// we could get the same document as before in this case we return no patches, as the value would be above the old window but not above the next position
 			if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[0].ID {
 				log.Println("Sorting. Document is in window and should now be above the window. The returned document is the same so we just send an update patch.")
-				return []json_patch.JSONPatch{getSimpleUpdatePatch(update, documentIndex)}
+				return []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex)}
 			}
 
 			patches := []json_patch.JSONPatch{}
@@ -230,7 +248,7 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 			// we could get the same document as before in this case we return a simple update patch, as the value would be below the old window but not below the next position
 			if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[len(watchQuery.WatchedDocuments)-1].ID {
 				log.Println("Sorting. Document is in window and should now be below the window. The returned document is the same so we just send an update patch.")
-				return []json_patch.JSONPatch{getSimpleUpdatePatch(update, documentIndex)}
+				return []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex)}
 			}
 
 			patches := []json_patch.JSONPatch{}
@@ -255,7 +273,7 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 		if newIndex != documentIndex {
 			// move document
 			patches := []json_patch.JSONPatch{}
-			patches = append(patches, getSimpleUpdatePatch(update, documentIndex))
+			patches = append(patches, getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex))
 			patches = append(patches, getSimpleMovePatch(documentIndex, newIndex))
 			watchQuery.SaveMoveDocumentInWindow(documentIndex, newIndex)
 			log.Println("Sorting. Document was in window and is still in window but moved to a different position. Move the document to the new position. And update the value.")
@@ -264,7 +282,7 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 
 		// if we do not move the document we can just make a simple update statement for the value
 		log.Println("Sorting. Document was in window and is still in window but at the same position. Update the value.")
-		return []json_patch.JSONPatch{getSimpleUpdatePatch(update, documentIndex)}
+		return []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex)}
 
 	}
 
@@ -408,8 +426,11 @@ func getFilteredAndSortedUpdatedPatches(dbService *db.DBService, watchQuery *db.
 
 		patches := []json_patch.JSONPatch{}
 		// if we get here we know that the document should be now inside the window
-		patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
-		watchQuery.SaveRemoveDocumentFromWindow(len(watchQuery.WatchedDocuments) - 1)
+		// if we are in a non exhausted window we need to remove the last one to make space
+		if !watchQuery.IsExhaustedWindow() {
+			patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+			watchQuery.SaveRemoveDocumentFromWindow(len(watchQuery.WatchedDocuments) - 1)
+		}
 
 		// get where the document should be inserted
 		newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
@@ -523,7 +544,7 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 		// check if the field is projected but not filtered or sorted
 		// in this case we can simply check if the field is in the window and as nothing to this will change we can give back a simple update patch
 		if isProjectedField && !isFilteredField && !isSortedField && updatedDocumentIsInWindow {
-			patches = []json_patch.JSONPatch{getSimpleUpdatePatch(&update, documentIndex)}
+			patches = []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, &update, documentIndex)}
 			log.Printf("Simple update patch for document %v", documentIndex)
 		} else if isFilteredField && !isSortedField {
 			patches = getSimpleFilteredUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
@@ -552,7 +573,6 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 			log.Printf("Ignoring update for field %v with new value %v", update.Field, update.Value)
 			continue
 		}
-
 	}
 
 	// as there can be a multiple of updates in one change we need to check if one patch makes other patches useless
