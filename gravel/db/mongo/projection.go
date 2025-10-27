@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func applyProjection(doc types.Document, options string) (types.Document, error) {
+func applyProjection(doc types.Document, options string, nestedPath string) (types.Document, error) {
 
 	// parse the find options to retrieve the projection as an object
 	findOptions, err := parseFindOptionsString(options)
@@ -28,6 +28,17 @@ func applyProjection(doc types.Document, options string) (types.Document, error)
 		return doc, nil
 	}
 
+	// if nestedPath is provided, extract the nested projection at that path
+	if nestedPath != "" {
+		nestedProjection := extractNestedProjection(projection, nestedPath)
+		if nestedProjection != nil {
+			projection = nestedProjection
+		} else {
+			// if no projection exists at the nested path, return empty document
+			return types.Document{}, nil
+		}
+	}
+
 	// flatten nested projection object into dot notation field paths
 	fieldPaths := flattenObject(projection)
 
@@ -48,7 +59,7 @@ func applyProjection(doc types.Document, options string) (types.Document, error)
 		if field == "_id" {
 			continue // handle _id separately
 		}
-		
+
 		// handle nested fields using dot notation
 		if val := getNestedValue(doc, field); val != nil {
 			setNestedValue(result, field, val)
@@ -69,10 +80,70 @@ func applyProjection(doc types.Document, options string) (types.Document, error)
 // Example: getNestedValue(doc, "user.name") returns the value at doc["user"]["name"]
 func getNestedValue(doc types.Document, path string) interface{} {
 	parts := strings.Split(path, ".")
-	
+
 	var current interface{} = doc
 	for _, part := range parts {
 		// check if current is a map
+		if m, ok := current.(types.Document); ok {
+			val, exists := m[part]
+			if !exists {
+				return nil
+			}
+			current = val
+		} else {
+			return nil
+		}
+	}
+
+	return current
+}
+
+// setNestedValue sets a value in a nested document using dot notation
+// Example: setNestedValue(doc, "user.name", "John") sets doc["user"]["name"] = "John"
+func setNestedValue(doc types.Document, path string, value interface{}) {
+	parts := strings.Split(path, ".")
+
+	// if it's a simple field (no dots), just set it directly
+	if len(parts) == 1 {
+		doc[parts[0]] = value
+		return
+	}
+
+	// navigate/create nested structure
+	current := doc
+	for i := 0; i < len(parts)-1; i++ {
+		part := parts[i]
+
+		// check if the key exists and is a map
+		if existing, exists := current[part]; exists {
+			if m, ok := existing.(map[string]interface{}); ok {
+				current = m
+				continue
+			}
+		}
+
+		// create a new nested map
+		newMap := make(map[string]interface{})
+		current[part] = newMap
+		current = newMap
+	}
+
+	// set the final value
+	current[parts[len(parts)-1]] = value
+}
+
+// extractNestedProjection extracts a nested projection object at the given dot-notation path
+// Example: extractNestedProjection({address: {street: 1, city: 1}}, "address") returns {street: 1, city: 1}
+func extractNestedProjection(projection map[string]interface{}, nestedPath string) map[string]interface{} {
+	if nestedPath == "" {
+		return projection
+	}
+
+	parts := strings.Split(nestedPath, ".")
+	var current interface{} = projection
+
+	// navigate through the path
+	for _, part := range parts {
 		if m, ok := current.(map[string]interface{}); ok {
 			val, exists := m[part]
 			if !exists {
@@ -83,40 +154,11 @@ func getNestedValue(doc types.Document, path string) interface{} {
 			return nil
 		}
 	}
-	
-	return current
-}
 
-// setNestedValue sets a value in a nested document using dot notation
-// Example: setNestedValue(doc, "user.name", "John") sets doc["user"]["name"] = "John"
-func setNestedValue(doc types.Document, path string, value interface{}) {
-	parts := strings.Split(path, ".")
-	
-	// if it's a simple field (no dots), just set it directly
-	if len(parts) == 1 {
-		doc[parts[0]] = value
-		return
+	// the final value should be a map representing the nested projection
+	if nestedProj, ok := current.(map[string]interface{}); ok {
+		return nestedProj
 	}
-	
-	// navigate/create nested structure
-	current := doc
-	for i := 0; i < len(parts)-1; i++ {
-		part := parts[i]
-		
-		// check if the key exists and is a map
-		if existing, exists := current[part]; exists {
-			if m, ok := existing.(map[string]interface{}); ok {
-				current = m
-				continue
-			}
-		}
-		
-		// create a new nested map
-		newMap := make(map[string]interface{})
-		current[part] = newMap
-		current = newMap
-	}
-	
-	// set the final value
-	current[parts[len(parts)-1]] = value
+
+	return nil
 }

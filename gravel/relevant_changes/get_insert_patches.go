@@ -25,7 +25,7 @@ func addDocumentToWindow(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 	newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
 
 	// get the document -> use the fulldocument and project it
-	newDocument, err := dbService.Connection.ProjectDocument(types.Document(change.FullDocument.(primitive.M)), watchQuery.Options)
+	newDocument, err := dbService.Connection.ProjectDocument(types.Document(change.FullDocument.(primitive.M)), watchQuery.Options, "")
 	if err != nil {
 		log.Printf("Error projecting document: %v", err)
 		return []json_patch.JSONPatch{}

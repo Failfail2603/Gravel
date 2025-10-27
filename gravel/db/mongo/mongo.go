@@ -552,6 +552,6 @@ func (m *MongoProvider) GetPositionForDocumentInWindow(documents []types.Watched
 	return getNewPositionForDocument(appendedDocuments, len(appendedDocuments)-1, sortFields)
 }
 
-func (m *MongoProvider) ProjectDocument(document types.Document, options string) (types.Document, error) {
-	return applyProjection(document, options)
+func (m *MongoProvider) ProjectDocument(document types.Document, options string, nestedPath string) (types.Document, error) {
+	return applyProjection(document, options, nestedPath)
 }
