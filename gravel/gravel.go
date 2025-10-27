@@ -9,6 +9,7 @@ import (
 	"gravel/relevant_changes"
 	"gravel/types"
 	"log"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
@@ -177,9 +178,6 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
-		// Now you have access to the query result here
-		log.Printf("Query executed successfully for client %s, result type: %s", req.ClientID, queryResult.Type)
-
 		// check if the watchquery already exists with the hash. Different clients can have the same watchquery.
 		// we need to ensure that all unique clients in the
 		watchQuery := dbService.WatchQueries[req.Hash]
@@ -263,7 +261,13 @@ func (gravel *GravelServer) StartListening() {
 		go func() {
 			for update := range dbService.UpdateChannel {
 
+				start := time.Now()
+
+				log.Println("Calculated Update for", update.ID)
 				patches := relevant_changes.GetPatchesForChange(dbService, &newWatchQuery, &update)
+				end := time.Now()
+				fmt.Println("Calculated Update took ", end.Sub(start).String())
+				log.Println("")
 
 				// check if the update is relevant for the watchquery
 				if len(patches) == 0 {

@@ -194,6 +194,42 @@
         display: flex;
         gap: 10px;
       }
+      .btn.warning {
+        background-color: #ff9800;
+      }
+      .btn.warning:hover {
+        background-color: #e68900;
+      }
+      .update-notification {
+        background-color: #d1ecf1;
+        border: 1px solid #17a2b8;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 20px;
+        font-size: 14px;
+        animation: fadeIn 0.3s ease-in;
+      }
+      .update-notification h4 {
+        margin: 0 0 10px 0;
+        color: #0c5460;
+      }
+      .update-notification ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      .update-notification li {
+        margin: 5px 0;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
     </style>
   </head>
   <body>
@@ -226,8 +262,17 @@
           <button class="btn" id="compareBtn" onclick="fetchData()">
             Refetch
           </button>
+          <button class="btn warning" onclick="makeRandomUpdate()">
+            🎲 Random Update
+          </button>
         </div>
       </div>
+
+      <!-- Update Notification -->
+      <div id="updateNotification"></div>
+
+      <!-- Controls Section -->
+      <div class="controls" style="display: none"></div>
 
       <div class="last-update" id="lastUpdate"></div>
       <div id="diffSummary"></div>
@@ -407,6 +452,26 @@
         ).textContent = `Last updated: ${now.toLocaleTimeString()}`;
       }
 
+      function renderDiffSummary(comparison) {
+        const diffSummaryEl = document.getElementById("diffSummary");
+
+        if (comparison.differences.length === 0) {
+          diffSummaryEl.innerHTML = `<div class="diff-summary" style="background-color: #d4edda; border-color: #28a745;"><strong>✅ ${comparison.message}</strong></div>`;
+        } else {
+          let diffHtml = `<div class="diff-summary"><strong>⚠️ ${comparison.message}:</strong><ul style="margin: 10px 0 0 0; padding-left: 20px;">`;
+          comparison.differences.slice(0, 10).forEach((diff) => {
+            diffHtml += `<li>${escapeHtml(diff)}</li>`;
+          });
+          if (comparison.differences.length > 10) {
+            diffHtml += `<li><em>... and ${
+              comparison.differences.length - 10
+            } more difference(s)</em></li>`;
+          }
+          diffHtml += `</ul></div>`;
+          diffSummaryEl.innerHTML = diffHtml;
+        }
+      }
+
       async function fetchData() {
         try {
           // Fetch from both endpoints
@@ -440,23 +505,7 @@
           // Compare the two endpoints against each other
           const comparison = compareData(data1, data2);
           console.log("Comparison result:", comparison);
-          const diffSummaryEl = document.getElementById("diffSummary");
-
-          if (comparison.differences.length === 0) {
-            diffSummaryEl.innerHTML = `<div class="diff-summary" style="background-color: #d4edda; border-color: #28a745;"><strong>✅ ${comparison.message}</strong></div>`;
-          } else {
-            let diffHtml = `<div class="diff-summary"><strong>⚠️ ${comparison.message}:</strong><ul style="margin: 10px 0 0 0; padding-left: 20px;">`;
-            comparison.differences.slice(0, 10).forEach((diff) => {
-              diffHtml += `<li>${escapeHtml(diff)}</li>`;
-            });
-            if (comparison.differences.length > 10) {
-              diffHtml += `<li><em>... and ${
-                comparison.differences.length - 10
-              } more difference(s)</em></li>`;
-            }
-            diffHtml += `</ul></div>`;
-            diffSummaryEl.innerHTML = diffHtml;
-          }
+          renderDiffSummary(comparison);
 
           // Update status
           document.getElementById("status").className = "status connected";
@@ -560,6 +609,149 @@
           document.getElementById(
             "status",
           ).textContent = `Error: ${error.message}`;
+        }
+      }
+
+      // Make a random update to a user's debitor
+      async function makeRandomUpdate() {
+        let updateCount = 0;
+        let lastUpdate = null;
+
+        try {
+          while (true) {
+            updateCount++;
+            document.getElementById("status").className = "status connected";
+            document.getElementById(
+              "status",
+            ).textContent = `Making random update #${updateCount}...`;
+
+            const startTime = performance.now();
+            const response = await fetch("/randomupdate", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+            });
+            const endTime = performance.now();
+            console.log(
+              `Random update took ${endTime - startTime} milliseconds.`,
+            );
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || "Failed to make update");
+            }
+
+            lastUpdate = await response.json();
+
+            // Wait 1 second for changes to propagate
+            await new Promise((resolve) => setTimeout(resolve, 500));
+
+            // Fetch data from both endpoints
+            const [response1, response2] = await Promise.all([
+              fetch("/data"),
+              fetch("/simplequery"),
+            ]);
+
+            if (!response1.ok || !response2.ok) {
+              throw new Error("Failed to fetch data for comparison");
+            }
+
+            const data1 = await response1.json();
+            const data2 = (await response2.json()).result;
+
+            // Always update tables with current data
+            document.getElementById("tableContainer1").innerHTML = createTable(
+              data1,
+              "/data",
+            );
+            document.getElementById("tableContainer2").innerHTML = createTable(
+              data2,
+              "/simplequery",
+            );
+
+            updateLastUpdate();
+
+            // Compare the data
+            const comparison = compareData(data1, data2);
+
+            if (comparison.differences.length > 0) {
+              console.log(comparison);
+              renderDiffSummary(comparison);
+              // Data is not identical anymore, stop the loop
+              document.getElementById("status").className = "status connected";
+              document.getElementById(
+                "status",
+              ).textContent = `Data differs after ${updateCount} update(s)! ✅`;
+
+              // Display the update notification with diff details
+              const notificationEl =
+                document.getElementById("updateNotification");
+
+              let diffList = "";
+              comparison.differences.slice(0, 5).forEach((diff) => {
+                diffList += `<li>${escapeHtml(diff)}</li>`;
+              });
+              if (comparison.differences.length > 5) {
+                diffList += `<li><em>... and ${
+                  comparison.differences.length - 5
+                } more difference(s)</em></li>`;
+              }
+
+              // Build list of updated users
+              let updatesList = "";
+              if (lastUpdate && lastUpdate.updates) {
+                lastUpdate.updates.forEach((update) => {
+                  const fields = update.updatedFields.join(", ");
+                  updatesList += `<li><strong>User:</strong> ${escapeHtml(
+                    String(update._id),
+                  )} (${escapeHtml(
+                    update.email || "N/A",
+                  )}) - <strong>Updated:</strong> ${escapeHtml(fields)}</li>`;
+                });
+              }
+
+              notificationEl.innerHTML = `
+                <div class="update-notification">
+                  <h4>✅ Random Updates Complete (${updateCount} update(s) made)</h4>
+                  <p><strong>Summary:</strong></p>
+                  <ul>
+                    <li><strong>Documents Updated:</strong> ${escapeHtml(
+                      String(lastUpdate.documentsUpdated),
+                    )}</li>
+                    <li><strong>Total Processed:</strong> ${escapeHtml(
+                      String(lastUpdate.totalDocumentsProcessed),
+                    )}</li>
+                  </ul>
+                  <p style="margin-top: 10px;"><strong>Updated Users:</strong></p>
+                  <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                    ${updatesList}
+                  </ul>
+                  <p style="margin-top: 10px;"><strong>Found ${
+                    comparison.differences.length
+                  } difference(s):</strong></p>
+                  <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                    ${diffList}
+                  </ul>
+                </div>
+              `;
+
+              // Final refetch to update the display
+              await fetchData();
+              break;
+            } else {
+              // Data is still identical, continue loop
+              console.log(
+                `Update #${updateCount}: Data still identical, trying again...`,
+              );
+            }
+          }
+        } catch (error) {
+          console.error("Error making random update:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error after ${updateCount} update(s): ${error.message}`;
         }
       }
 

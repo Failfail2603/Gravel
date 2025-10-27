@@ -1,3 +1,4 @@
+import { faker } from "@faker-js/faker";
 import express, { type Request, type Response } from "express";
 import patch, { type Operation } from "fast-json-patch";
 import { MongoClient } from "mongodb";
@@ -8,16 +9,16 @@ import type { GravelMongoWatchQueryFindOptions } from "./db/mongo.js";
 import { getGravelConnection, GravelDBs } from "./gravel.js";
 
 let query: any = {
-  debitor: { $lte: 20000 },
+  role: "admin",
+  email: /land@/,
 };
 
 let options: GravelMongoWatchQueryFindOptions = {
   sort: {
+    role: 1,
     debitor: -1,
     _id: -1,
   },
-  limit: 20,
-  skip: 20,
   projection: {
     _id: 1,
     email: 1,
@@ -58,12 +59,8 @@ app.get("/data", (req: Request, res: Response) => {
 
 app.get("/simplequery", async (req: Request, res: Response) => {
   try {
-    // Connect to MongoDB directly
-    const client = new MongoClient("mongodb://localhost:27017/gravel_db", {
-      directConnection: true,
-      replicaSet: "rs0",
-    });
-    await client.connect();
+    // Get singleton MongoDB client
+    const client = await getMongoClient();
 
     // Get database and collection
     const collection = client.db().collection("users");
@@ -76,9 +73,6 @@ app.get("/simplequery", async (req: Request, res: Response) => {
       .limit(options.limit || 0)
       .project(options.projection || {})
       .toArray();
-
-    // Close connection
-    await client.close();
 
     // Return results
     res.json({ result: results });
@@ -127,12 +121,153 @@ app.get("/getquery", (req: Request, res: Response) => {
   res.json({ query, options });
 });
 
+// Helper function to generate random email using faker
+function generateRandomEmail(): string {
+  return faker.internet.email();
+}
+
+// Helper function to generate random address fields using faker
+function generateRandomAddress(): object {
+  return {
+    street: faker.location.streetAddress(),
+    city: faker.location.city(),
+    state: faker.location.state(),
+    zip: faker.location.zipCode(),
+    country: faker.location.country(),
+  };
+}
+
+// Helper function to generate random birthday (18-80 years ago) using faker
+function generateRandomBirthday(): Date {
+  return faker.date.birthdate({ min: 18, max: 80, mode: "age" });
+}
+
+// Helper function to generate random update fields
+function generateRandomUpdateFields(): object {
+  const possibleFields = ["email", "debitor", "role", "address", "birthday"];
+  // Update 1-4 random fields
+  const numFields = Math.floor(Math.random() * 4) + 1;
+  const fieldsToUpdate = possibleFields
+    .sort(() => Math.random() - 0.5)
+    .slice(0, numFields);
+
+  const updateData: any = {
+    last_updated: new Date(),
+  };
+
+  for (const field of fieldsToUpdate) {
+    switch (field) {
+      case "email":
+        updateData.email = generateRandomEmail();
+        break;
+      case "debitor":
+        updateData.debitor = Math.floor(Math.random() * 999000) + 1000;
+        break;
+      case "role":
+        const roles = ["user", "admin", "moderator"];
+        updateData.role = roles[Math.floor(Math.random() * roles.length)];
+        break;
+      case "address":
+        updateData.address = generateRandomAddress();
+        break;
+      case "birthday":
+        updateData.birthday = generateRandomBirthday();
+        break;
+    }
+  }
+
+  return updateData;
+}
+
+// API endpoint to make random updates to multiple users with multiple fields
+app.post("/randomupdate", async (req: Request, res: Response) => {
+  try {
+    // Get singleton MongoDB client
+    const client = await getMongoClient();
+
+    // Get database and collection
+    const collection = client.db().collection("users");
+
+    // Get total user count to determine how many to update
+    const totalUsers = await collection.countDocuments({});
+
+    if (totalUsers === 0) {
+      res.status(404).json({ error: "No users found in database" });
+      return;
+    }
+
+    // Determine random number of users to update (1-10% of total, min 1, max 50)
+    const maxUpdates = Math.min(50, Math.max(1, Math.floor(totalUsers / 10)));
+    const numUpdates = Math.floor(Math.random() * maxUpdates) + 1;
+
+    // Get random users using $sample aggregation
+    const users = await collection
+      .aggregate([{ $sample: { size: numUpdates } }])
+      .toArray();
+
+    if (users.length === 0) {
+      res.status(404).json({ error: "No users found to update" });
+      return;
+    }
+
+    // Prepare bulk write operations
+    const bulkOps = users.map((user) => {
+      const updateFields = generateRandomUpdateFields();
+      return {
+        updateOne: {
+          filter: { _id: user._id },
+          update: { $set: updateFields },
+        },
+      };
+    });
+
+    // Execute bulk write
+    const bulkResult = await collection.bulkWrite(bulkOps);
+
+    // Collect update information for response
+    const updateInfo = users.map((user, index) => ({
+      _id: user._id,
+      email: user.email,
+      updatedFields: Object.keys(bulkOps[index].updateOne.update.$set).filter(
+        (k) => k !== "last_updated",
+      ),
+    }));
+
+    // Return the update information
+    res.json({
+      success: true,
+      documentsUpdated: bulkResult.modifiedCount,
+      totalDocumentsProcessed: users.length,
+      updates: updateInfo,
+    });
+  } catch (error) {
+    console.error("Random update error:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Express server running at http://localhost:${PORT}`);
 });
 
 let gravel: Awaited<ReturnType<typeof getGravelConnection>> | null = null;
 let gravelMongoClient: any = null;
+let mongoClient: MongoClient | null = null;
+
+// Singleton MongoDB client getter
+async function getMongoClient(): Promise<MongoClient> {
+  if (!mongoClient) {
+    mongoClient = new MongoClient("mongodb://localhost:27017/gravel_db", {
+      directConnection: true,
+      replicaSet: "rs0",
+    });
+    await mongoClient.connect();
+    console.log("MongoDB client connected");
+  }
+  return mongoClient;
+}
 
 async function initializeGravel() {
   if (!gravel) {
@@ -207,6 +342,10 @@ async function test() {
     console.log("\nReceived SIGINT (Ctrl+C). Stopping gracefully...");
     if (stopWatchQuery) {
       await stopWatchQuery();
+    }
+    if (mongoClient) {
+      await mongoClient.close();
+      console.log("MongoDB client closed");
     }
     process.exit(0);
   });

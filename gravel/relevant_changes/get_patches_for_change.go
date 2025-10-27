@@ -4,7 +4,6 @@ import (
 	"gravel/db"
 	"gravel/json_patch"
 	"gravel/types"
-	"log"
 )
 
 func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent) []json_patch.JSONPatch {
@@ -15,13 +14,11 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 	case "insert", "update", "delete", "replace":
 		// These operations are relevant, continue processing
 	default:
-		log.Println("Change is not relevant. Unsupported Operation: ", change.Operation)
 		return []json_patch.JSONPatch{}
 	}
 
 	// first trivial check. If the collection is not the same we can skip it as the change will never be relevant
 	if watchQuery.Collection != change.Collection {
-		log.Println("Change is not relevant. Wrong Collection: ", change.Collection)
 		return []json_patch.JSONPatch{}
 	}
 

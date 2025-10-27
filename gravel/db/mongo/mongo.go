@@ -419,8 +419,6 @@ func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document types
 		{{Key: "$match", Value: filter}},
 	}
 
-	log.Printf("Testing filter with aggregation pipeline: %v", pipeline)
-
 	// Execute the aggregation on any database (we use admin since we don't need a real collection)
 	// The $documents stage creates ephemeral data, so no collection access is needed
 	cursor, err := m.client.Database("gravel").Aggregate(ctx, pipeline)
@@ -436,14 +434,9 @@ func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document types
 		return false, fmt.Errorf("cursor error: %w", err)
 	}
 
-	log.Printf("Filter result: %v", hasResults)
-
 	if hasResults {
-		log.Printf("Filter successfully matched the document")
 		return true, nil
 	}
-
-	log.Printf("Filter did not match the document")
 	return false, nil
 }
 
@@ -497,8 +490,6 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 			Order: -1,
 		})
 	}
-
-	log.Printf("Find Options sort: %+v\n", findOptions.Sort)
 
 	// debug print
 	log.Printf("SortFields: %+v\n", queryInformation.SortFields)

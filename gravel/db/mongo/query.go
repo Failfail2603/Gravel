@@ -53,8 +53,6 @@ func getRelevantFieldsFromQueryObject(queryObject bson.M) ([]string, error) {
 	// Extract relevant fields from filter
 	filterFields := flattenObject(queryObject)
 
-	log.Printf("%+q", filterFields)
-
 	// as a query can consist of multiple conditions and mongo specific keywords we need to remove the $ keywords from the fields as they are not relevant for the watchquery
 	// Extract actual field names by removing MongoDB query keywords from field paths
 	var cleanedFields []string
@@ -85,9 +83,6 @@ func getRelevantFieldsFromQueryObject(queryObject bson.M) ([]string, error) {
 		}
 	}
 	filterFields = cleanedFields
-
-	// Print extracted filter fields for debugging
-	log.Printf("%+q", filterFields)
 
 	return filterFields, nil
 }
