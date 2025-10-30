@@ -1,8 +1,11 @@
 package db
 
 import (
+	"gravel/json_patch"
 	"gravel/types"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 type WatchQuery struct {
@@ -95,4 +98,92 @@ func (w *WatchQuery) SaveMoveDocumentInWindow(oldIndex int, newIndex int) {
 
 	// insert at the new position
 	w.WatchedDocuments = slices.Insert(w.WatchedDocuments, adjustedNewIndex, document)
+}
+
+func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSONPatch) {
+	for _, patch := range patches {
+		switch patch.Op {
+		case "add":
+			// Extract index from path (e.g., "/result/0" -> 0, "/result/-" -> -1)
+			index := parseIndexFromPath(patch.Path)
+			// Extract document from patch value
+			if doc, ok := patch.Value.(types.Document); ok {
+				w.SaveAddDocumentToWindow(dbService, doc, index)
+			}
+		case "remove":
+			// Extract index from path
+			index := parseIndexFromPath(patch.Path)
+			w.SaveRemoveDocumentFromWindow(index)
+		case "move":
+			// Extract old index from "from" and new index from "path"
+			oldIndex := parseIndexFromPath(patch.From)
+			newIndex := parseIndexFromPath(patch.Path)
+			w.SaveMoveDocumentInWindow(oldIndex, newIndex)
+		case "replace":
+			// Check if this is a replace on a sorted field
+			index, field := parseIndexAndFieldFromPath(patch.Path)
+			if index == -1 {
+				continue
+			}
+
+			// Check if the field is a sorted field
+			isSortedField := false
+			sortFieldIndex := -1
+			for i, sortField := range w.QueryInformation.SortFields {
+				if sortField.Field == field {
+					isSortedField = true
+					sortFieldIndex = i
+					break
+				}
+			}
+
+			// If it's a sorted field, update the WatchedDocument's sort values
+			if isSortedField && index < len(w.WatchedDocuments) {
+				w.WatchedDocuments[index].SortValues[sortFieldIndex] = patch.Value
+			}
+		}
+	}
+}
+
+// parseIndexFromPath extracts the index from a JSON patch path
+// e.g., "/result/0" -> 0, "/result/-" -> -1
+func parseIndexFromPath(path string) int {
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		return -1
+	}
+
+	if parts[2] == "-" {
+		return -1
+	}
+
+	index, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return -1
+	}
+
+	return index
+}
+
+// parseIndexAndFieldFromPath extracts both the index and field from a JSON patch path
+// e.g., "/result/0/name" -> (0, "name"), "/result/5/address" -> (5, "address")
+func parseIndexAndFieldFromPath(path string) (int, string) {
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		return -1, ""
+	}
+
+	if parts[2] == "-" {
+		return -1, ""
+	}
+
+	index, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return -1, ""
+	}
+
+	// Join remaining parts with "." for nested fields (e.g., "/result/0/address/city" -> "address.city")
+	field := strings.Join(parts[3:], ".")
+
+	return index, field
 }

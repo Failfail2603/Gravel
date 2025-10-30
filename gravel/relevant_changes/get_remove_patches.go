@@ -27,7 +27,7 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	// 1. the document is in the window -> remove it and get a new one to fill
 	// the function itselfs checks if the window is exhausted or infinite and gets a new document accroding to that
 	if removedDocumentWasInWindow {
-		return removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex)
+		return removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex, change)
 	}
 
 	// 2. the document is above the window -> shift window down
@@ -61,5 +61,5 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	}
 
 	// if the document was above the window we need to shift down so we can fill the gap
-	return ShiftWindow(dbService, watchQuery, ShiftDown)
+	return ShiftWindow(dbService, watchQuery, ShiftDown, change)
 }

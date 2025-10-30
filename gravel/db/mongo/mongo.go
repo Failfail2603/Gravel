@@ -16,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
 type MongoProvider struct {
@@ -143,6 +144,16 @@ func (m *MongoProvider) enablePrePostImagesOnCollections(client *mongo.Client, c
 
 // Query runs a normal query against the database. Mainly used for initial data loading
 func (m *MongoProvider) Query(collection string, query string, findOptionsStr string) []types.Document {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return m.QueryWithContext(ctx, collection, query, findOptionsStr)
+}
+
+// QueryWithContext runs a query with a specific context (e.g., for snapshot reads in transactions)
+func (m *MongoProvider) QueryWithContext(ctx context.Context, collection string, query string, findOptionsStr string) []types.Document {
+	startTime := time.Now()
+	log.Printf("[PROFILE] Query started for collection: %s", collection)
+
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot execute query")
 		return nil
@@ -150,12 +161,10 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 
 	// Get the collection
 	coll := m.client.Database(m.DatabaseName).Collection(collection)
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	log.Printf("[PROFILE] Collection retrieved in %v", time.Since(startTime))
 
 	// Parse query string to bson.M
+	parseStart := time.Now()
 	var filter bson.M
 	if query == "" {
 		filter = bson.M{}
@@ -165,23 +174,34 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 			return nil
 		}
 	}
+	log.Printf("[PROFILE] Query parsing took %v", time.Since(parseStart))
 
+	optionsStart := time.Now()
 	findOptions, err := parseFindOptionsString(findOptionsStr)
 	if err != nil {
 		log.Printf("Failed to parse query string: %v", err)
 		return nil
 	}
+	log.Printf("[PROFILE] FindOptions parsing took %v", time.Since(optionsStart))
+
+	if findOptions.Limit != nil && *findOptions.Limit == 1 {
+		findOptions.SetBatchSize(1)
+	}
 
 	// Execute the query
+	queryStart := time.Now()
 	cursor, err := coll.Find(ctx, filter, &findOptions)
 	if err != nil {
 		log.Printf("Failed to execute query: %v", err)
 		return nil
 	}
 	defer cursor.Close(ctx)
+	log.Printf("[PROFILE] Query execution took %v", time.Since(queryStart))
 
 	// Collect results
+	decodeStart := time.Now()
 	var results []types.Document
+	docCount := 0
 	for cursor.Next(ctx) {
 		var doc bson.M
 		if err := cursor.Decode(&doc); err != nil {
@@ -189,12 +209,15 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 			continue
 		}
 		results = append(results, types.Document(doc))
+		docCount++
 	}
 
 	if err := cursor.Err(); err != nil {
 		log.Printf("Cursor error: %v", err)
 		return nil
 	}
+	log.Printf("[PROFILE] Decoded %d documents in %v", docCount, time.Since(decodeStart))
+	log.Printf("[PROFILE] Total query time: %v", time.Since(startTime))
 	return results
 }
 
@@ -367,6 +390,28 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				fullDocumentBeforeChange = preImage
 			}
 
+			// Start a session with snapshot read concern for this change event
+			// This ensures consistent reads during patch calculation
+			session, err := m.client.StartSession()
+			if err != nil {
+				log.Printf("Failed to start session for change event %s: %v", id, err)
+				continue
+			}
+
+			// Set transaction options with snapshot read concern
+			txnOpts := options.Transaction().
+				SetReadConcern(readconcern.Snapshot())
+
+			// Start transaction
+			if err := session.StartTransaction(txnOpts); err != nil {
+				log.Printf("Failed to start transaction for change event %s: %v", id, err)
+				session.EndSession(context.Background())
+				continue
+			}
+
+			// Create session context for queries
+			sessionCtx := mongo.NewSessionContext(context.Background(), session)
+
 			// Create and send change event
 			event := types.DBChangeStreamEvent{
 				Database:                 mongoUrl,
@@ -377,6 +422,9 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				FullDocument:             fullDocument,
 				FullDocumentBeforeChange: fullDocumentBeforeChange,
 				Timestamp:                time.Now(),
+				Session:                  session,
+				SessionContext:           sessionCtx,
+				UpdateCache:              make(map[int]types.Document),
 			}
 
 			select {
@@ -384,6 +432,9 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				// log.Printf("Sent change event for %s: %s", mongoUrl, operation)
 			case <-stopChan:
 				log.Printf("Change stream for %s stopped while sending event", mongoUrl)
+				// Clean up session if we're stopping
+				session.AbortTransaction(context.Background())
+				session.EndSession(context.Background())
 				return
 			}
 		}

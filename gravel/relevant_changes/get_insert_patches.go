@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func GetSimpleAddPatch(documentIndex int, document interface{}) json_patch.JSONPatch {
+func GetSimpleAddPatch(documentIndex int, document types.Document) json_patch.JSONPatch {
 	return json_patch.JSONPatch{
 		Op:    "add",
 		Path:  json_patch.GetBasePatchPath(documentIndex),
@@ -33,7 +33,6 @@ func addDocumentToWindow(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 
 	// add the patch
 	patches = append(patches, GetSimpleAddPatch(newIndex, newDocument))
-	watchQuery.SaveAddDocumentToWindow(dbService, newDocument, newIndex)
 
 	return patches
 }
@@ -73,7 +72,7 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 		// if the document is above the window we need to shift the window up
 		if positionRelativeToFirst == 1 {
-			return ShiftWindow(dbService, watchQuery, ShiftUp)
+			return ShiftWindow(dbService, watchQuery, ShiftUp, change)
 		}
 	}
 

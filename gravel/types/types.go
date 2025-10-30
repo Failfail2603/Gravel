@@ -1,6 +1,11 @@
 package types
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
+)
 
 // FieldUpdate represents a single field change within a database change event
 type FieldUpdate struct {
@@ -20,6 +25,15 @@ type DBChangeStreamEvent struct {
 	FullDocumentBeforeChange interface{}   `json:"fullDocumentBeforeChange"` // The complete document before the change (pre-image)
 	Timestamp                time.Time     `json:"timestamp"`
 	Updates                  []FieldUpdate `json:"updates"` // Individual field changes extracted from the change event
+	// we might need to fetch a document multiple times while processing the updates for a single watchquery change event
+	// to prevent this we cache the retrieved documents for a single event as the database should be
+	UpdateCache map[int]Document `json:"-"`
+	// Transaction support: Session and context for snapshot reads during patch calculation
+	Session        mongo.Session   `json:"-"`
+	SessionContext context.Context `json:"-"`
+
+	// track what indices got removed so we do not remove them again
+	RemovedIndices []int `json:"-"`
 }
 
 // DatabaseConnectRequest represents a request to connect to a database

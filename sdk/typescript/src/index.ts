@@ -10,7 +10,18 @@ import { getGravelConnection, GravelDBs } from "./gravel.js";
 
 let query: any = {
   role: "admin",
-  email: /land@/,
+  $and: [
+    {
+      debitor: {
+        $gt: 200000,
+      },
+    },
+    {
+      debitor: {
+        $lt: 800000,
+      },
+    },
+  ],
 };
 
 let options: GravelMongoWatchQueryFindOptions = {
@@ -19,6 +30,8 @@ let options: GravelMongoWatchQueryFindOptions = {
     debitor: -1,
     _id: -1,
   },
+  skip: 50000,
+  limit: 1000,
   projection: {
     _id: 1,
     email: 1,
@@ -202,7 +215,7 @@ app.post("/randomupdate", async (req: Request, res: Response) => {
 
     // Get random users using $sample aggregation
     const users = await collection
-      .aggregate([{ $sample: { size: numUpdates } }])
+      .aggregate([{ $sample: { size: 1 } }])
       .toArray();
 
     if (users.length === 0) {

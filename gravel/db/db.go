@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"gravel/db/mongo"
 	"gravel/types"
@@ -15,6 +16,8 @@ type DBProvider interface {
 	Disconnect() error
 	GetQueryAnalysis(query types.WatchQueryRequest, queryResult *types.WatchQueryResponse) (types.QueryAnalysis, error)
 	Query(collection string, query string, findOptions string) []types.Document
+	// QueryWithContext executes a query using the provided context (e.g., for snapshot reads in transactions)
+	QueryWithContext(ctx context.Context, collection string, query string, findOptions string) []types.Document
 	StartChangeStream(natsResponseChanneldbUpdates chan types.DBChangeStreamEvent)
 	StopChangeStream()
 	TestFilterWithDocument(filterJSON string, document types.Document) (bool, error)

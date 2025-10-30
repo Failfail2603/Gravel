@@ -6,6 +6,8 @@ import (
 	"gravel/db"
 	"gravel/json_patch"
 	"gravel/types"
+	"log"
+	"time"
 )
 
 // ShiftDirection represents a one-step window shift direction.
@@ -49,7 +51,7 @@ func isWindowShiftApplicable(watchQuery *db.WatchQuery, dir ShiftDirection) bool
 	return false
 }
 
-func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDirection) []json_patch.JSONPatch {
+func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDirection, change *types.DBChangeStreamEvent) []json_patch.JSONPatch {
 	patches := []json_patch.JSONPatch{}
 
 	// early exit if the window is not shiftable
@@ -58,13 +60,13 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 	}
 
 	// get single document from the cursor in which the window is shifting
-	skip := watchQuery.QueryInformation.WindowStart
+	index := watchQuery.QueryInformation.WindowStart
 	if dir == ShiftDown {
-		skip = watchQuery.QueryInformation.WindowEnd - 1
+		index = watchQuery.QueryInformation.WindowEnd - 1
 	}
 
-	// query the new document
-	newDocument := GetSingleDocumentInWindowOnIndex(dbService, watchQuery, skip)
+	// query the new document using session context from change event
+	newDocument := GetSingleDocumentOnIndex(dbService, watchQuery, change, index)
 
 	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
 	if len(newDocument) == 0 {
@@ -74,43 +76,26 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 	// make a patch to delete the document from the window in the end of the shift direction
 	removeIndex := 0
 	if dir == ShiftUp {
-		removeIndex = watchQuery.QueryInformation.WindowLimit - 1
+		removeIndex = len(watchQuery.WatchedDocuments) - 1
 	}
 
-	deletePatch := json_patch.JSONPatch{
-		Op:   "remove",
-		Path: fmt.Sprintf("/result/%d", removeIndex),
-	}
+	deletePatch := GetSimpleRemovePatch(removeIndex)
 	patches = append(patches, deletePatch)
 
-	// remove the _id from the watched document ids
-	watchQuery.SaveRemoveDocumentFromWindow(removeIndex)
-
-	addIndex := "0"
+	addIndex := 0
 	if dir == ShiftDown {
-		addIndex = "-"
+		addIndex = -1
 	}
 
 	// make a patch to add the document to the window in the start of the shift direction
-	addPatch := json_patch.JSONPatch{
-		Op:    "add",
-		Path:  fmt.Sprintf("/result/%s", addIndex),
-		Value: newDocument[0],
-	}
+	addPatch := GetSimpleAddPatch(addIndex, newDocument[0])
 	patches = append(patches, addPatch)
-
-	// insert the _id at the correct position
-	insertIndex := 0
-	if dir == ShiftDown {
-		insertIndex = len(watchQuery.WatchedDocuments)
-	}
-
-	watchQuery.SaveAddDocumentToWindow(dbService, newDocument[0], insertIndex)
 
 	return patches
 }
 
-func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, index int) []types.Document {
+func GetSingleDocumentOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, index int) []types.Document {
+	start := time.Now()
 	// Parse the original options preserving structure for fields we don't modify
 	var optionsRaw struct {
 		Sort       json.RawMessage        `json:"sort,omitempty"`
@@ -118,6 +103,11 @@ func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.Wa
 		Skip       *int                   `json:"skip,omitempty"`
 		Limit      *int                   `json:"limit,omitempty"`
 		Extra      map[string]interface{} `json:"-"`
+	}
+
+	// check the cache first
+	if change.UpdateCache[index] != nil {
+		return []types.Document{change.UpdateCache[index]}
 	}
 
 	if watchQuery.Options != "" {
@@ -150,13 +140,17 @@ func GetSingleDocumentInWindowOnIndex(dbService *db.DBService, watchQuery *db.Wa
 		return nil
 	}
 
-	// query the new document
-	documents := dbService.Connection.Query(watchQuery.Collection, watchQuery.Query, string(optionsJSON))
+	// query the new document using session context if available
+	documents := dbService.Connection.QueryWithContext(change.SessionContext, watchQuery.Collection, watchQuery.Query, string(optionsJSON))
 
 	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
 	if len(documents) == 0 {
 		return nil
 	}
 
+	// save the document to the cache
+	change.UpdateCache[index] = documents[0]
+
+	log.Printf("GetSingleDocumentOnIndex took %s\n", time.Since(start))
 	return documents
 }
