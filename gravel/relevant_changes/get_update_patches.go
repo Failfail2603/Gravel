@@ -327,6 +327,9 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 
 	patches := []json_patch.JSONPatch{}
 
+	// if we delete a document from the window at index 0 we later need to insert the one one sport above as the calculation of the insertion is still on the old state
+	insertOffset := 0
+
 	if !watchQuery.IsInfiniteWindow() && watchQuery.QueryInformation.WindowStart > 0 {
 		beforePositionRelativeToFirst, err := getPositionOfOldDocumentRelativeTo(dbService, watchQuery, change, 0)
 		if err != nil {
@@ -338,6 +341,10 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 		// in this case we do not delete the last one from our window but instead the first one as it should move up the cursor
 		if beforePositionRelativeToFirst == 1 {
 			patches = append(patches, GetSimpleRemovePatch(0))
+
+			// document was deleted at the start of the window so offset insertion by -1
+			insertOffset = -1
+
 			log.Println("Sorting. Old did match and new one also. Update was outside the window and now should be added. Document was above the window. So remove the first one from the window.")
 		} else {
 			// in this case the document was below the window and comes from there. here we should delete the last one from the window
@@ -350,10 +357,10 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 	newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
 
 	// get the document
-	newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart+newIndex)
+	newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart+newIndex+insertOffset)
 
 	// add the document at the correct position inside the window
-	patches = append(patches, GetSimpleAddPatch(newIndex, newDocuments[0]))
+	patches = append(patches, GetSimpleAddPatch(newIndex+insertOffset, newDocuments[0]))
 	log.Println("Sorting. Document moved into the window. Add it to the window.")
 	return patches
 }

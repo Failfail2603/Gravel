@@ -1,10 +1,9 @@
 package types
 
 import (
-	"context"
 	"time"
 
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // FieldUpdate represents a single field change within a database change event
@@ -28,9 +27,8 @@ type DBChangeStreamEvent struct {
 	// we might need to fetch a document multiple times while processing the updates for a single watchquery change event
 	// to prevent this we cache the retrieved documents for a single event as the database should be
 	UpdateCache map[int]Document `json:"-"`
-	// Transaction support: Session and context for snapshot reads during patch calculation
-	Session        mongo.Session   `json:"-"`
-	SessionContext context.Context `json:"-"`
+	// ClusterTime from the change event for snapshot reads at that specific point in time
+	ClusterTime *primitive.Timestamp `json:"-"`
 
 	// track what indices got removed so we do not remove them again
 	RemovedIndices []int `json:"-"`

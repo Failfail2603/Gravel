@@ -262,22 +262,12 @@ func (gravel *GravelServer) StartListening() {
 			for update := range dbService.UpdateChannel {
 
 				start := time.Now()
-				log.Println("")
 				log.Println("Calculated Update for", update.ID)
-				
+				log.Println("Update timestamp:", update.Timestamp.Unix())
+
 				// Calculate patches with snapshot isolation
 				patches := relevant_changes.GetPatchesForChange(dbService, &newWatchQuery, &update)
-				
-				// Clean up transaction and session after patch calculation
-				if update.Session != nil {
-					// Abort the transaction (we only used it for reads)
-					if err := update.Session.AbortTransaction(update.SessionContext); err != nil {
-						log.Printf("Warning: Failed to abort transaction for change %s: %v", update.ID, err)
-					}
-					// End the session
-					update.Session.EndSession(update.SessionContext)
-				}
-				
+
 				log.Println("Patches len", len(patches))
 				end := time.Now()
 				log.Println("Calculated Update took ", end.Sub(start).String())

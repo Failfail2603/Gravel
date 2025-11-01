@@ -30,8 +30,8 @@ let options: GravelMongoWatchQueryFindOptions = {
     debitor: -1,
     _id: -1,
   },
-  skip: 50000,
-  limit: 1000,
+  skip: 70000,
+  limit: 2000,
   projection: {
     _id: 1,
     email: 1,
@@ -192,6 +192,9 @@ function generateRandomUpdateFields(): object {
   return updateData;
 }
 
+// Configuration: Set to true for bulk operations, false for individual updateOne loop
+const USE_BULK_OPERATIONS = true;
+
 // API endpoint to make random updates to multiple users with multiple fields
 app.post("/randomupdate", async (req: Request, res: Response) => {
   try {
@@ -215,7 +218,35 @@ app.post("/randomupdate", async (req: Request, res: Response) => {
 
     // Get random users using $sample aggregation
     const users = await collection
-      .aggregate([{ $sample: { size: 1 } }])
+      .aggregate([
+        // {
+        //   $match: {
+        //     role: "admin",
+        //     $and: [
+        //       {
+        //         debitor: {
+        //           $gt: 200000,
+        //         },
+        //       },
+        //       {
+        //         debitor: {
+        //           $lt: 800000,
+        //         },
+        //       },
+        //     ],
+        //   },
+        // },
+        // {
+        //   $sort: {
+        //     role: 1,
+        //     debitor: -1,
+        //     _id: -1,
+        //   },
+        // },
+        // { $limit: 20 },
+
+        { $sample: { size: numUpdates } },
+      ])
       .toArray();
 
     if (users.length === 0) {
@@ -223,35 +254,56 @@ app.post("/randomupdate", async (req: Request, res: Response) => {
       return;
     }
 
-    // Prepare bulk write operations
-    const bulkOps = users.map((user) => {
-      const updateFields = generateRandomUpdateFields();
-      return {
-        updateOne: {
-          filter: { _id: user._id },
-          update: { $set: updateFields },
-        },
-      };
-    });
+    let modifiedCount = 0;
 
-    // Execute bulk write
-    const bulkResult = await collection.bulkWrite(bulkOps);
+    if (USE_BULK_OPERATIONS) {
+      // Prepare bulk write operations
+      const bulkOps = users.map((user) => {
+        const updateFields = generateRandomUpdateFields();
+        return {
+          updateOne: {
+            filter: { _id: user._id },
+            update: {
+              $set: updateFields,
+            },
+          },
+        };
+      });
+
+      // Execute bulk write
+      const bulkResult = await collection.bulkWrite(bulkOps);
+      modifiedCount = bulkResult.modifiedCount;
+    } else {
+      // Execute individual updateOne operations in a loop
+
+      // const updateFields = generateRandomUpdateFields();
+      const result = await collection.updateMany(
+        { _id: { $in: users.map((user) => user._id) } },
+        {
+          $set: {
+            debitor: 10000,
+          },
+        },
+      );
+      modifiedCount += result.modifiedCount;
+
+      // await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
 
     // Collect update information for response
-    const updateInfo = users.map((user, index) => ({
+    const updateInfo = users.map((user) => ({
       _id: user._id,
       email: user.email,
-      updatedFields: Object.keys(bulkOps[index].updateOne.update.$set).filter(
-        (k) => k !== "last_updated",
-      ),
+      updatedFields: ["debitor"],
     }));
 
     // Return the update information
     res.json({
       success: true,
-      documentsUpdated: bulkResult.modifiedCount,
+      documentsUpdated: modifiedCount,
       totalDocumentsProcessed: users.length,
       updates: updateInfo,
+      method: USE_BULK_OPERATIONS ? "bulk" : "loop",
     });
   } catch (error) {
     console.error("Random update error:", error);

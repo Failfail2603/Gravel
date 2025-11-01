@@ -16,7 +16,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
 type MongoProvider struct {
@@ -146,16 +145,26 @@ func (m *MongoProvider) enablePrePostImagesOnCollections(client *mongo.Client, c
 func (m *MongoProvider) Query(collection string, query string, findOptionsStr string) []types.Document {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return m.QueryWithContext(ctx, collection, query, findOptionsStr)
+	// Create a minimal event for non-snapshot queries (no clusterTime)
+	event := &types.DBChangeStreamEvent{
+		UpdateCache: make(map[int]types.Document),
+	}
+	return m.QueryWithEvent(ctx, event, collection, query, findOptionsStr)
 }
 
-// QueryWithContext runs a query with a specific context (e.g., for snapshot reads in transactions)
-func (m *MongoProvider) QueryWithContext(ctx context.Context, collection string, query string, findOptionsStr string) []types.Document {
+// QueryWithEvent runs a query with optional snapshot read concern at a specific cluster time
+// If event.ClusterTime is provided, the query will use snapshot read concern at that specific point in time
+func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChangeStreamEvent, collection string, query string, findOptionsStr string) []types.Document {
 	startTime := time.Now()
 	log.Printf("[PROFILE] Query started for collection: %s", collection)
 
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot execute query")
+		return nil
+	}
+
+	if event == nil {
+		log.Printf("No event provided, cannot execute query")
 		return nil
 	}
 
@@ -182,15 +191,69 @@ func (m *MongoProvider) QueryWithContext(ctx context.Context, collection string,
 		log.Printf("Failed to parse query string: %v", err)
 		return nil
 	}
-	log.Printf("[PROFILE] FindOptions parsing took %v", time.Since(optionsStart))
 
-	if findOptions.Limit != nil && *findOptions.Limit == 1 {
-		findOptions.SetBatchSize(1)
-	}
+	log.Printf("[PROFILE] FindOptions parsing took %v", time.Since(optionsStart))
 
 	// Execute the query
 	queryStart := time.Now()
-	cursor, err := coll.Find(ctx, filter, &findOptions)
+	var cursor *mongo.Cursor
+
+	// If ClusterTime is provided, use RunCommand with custom read concern including atClusterTime
+	// This ensures all reads happen at the exact same point in time as the change event
+	if event.ClusterTime != nil {
+		// Construct find command with snapshot read concern at specific cluster time
+		cmd := bson.D{
+			{Key: "find", Value: collection},
+			{Key: "filter", Value: filter},
+			{Key: "readConcern", Value: bson.D{
+				{Key: "level", Value: "snapshot"},
+				{Key: "atClusterTime", Value: event.ClusterTime},
+			}},
+		}
+
+		// Add findOptions to command
+		if findOptions.Limit != nil {
+			cmd = append(cmd, bson.E{Key: "limit", Value: *findOptions.Limit})
+		}
+		if findOptions.Skip != nil {
+			cmd = append(cmd, bson.E{Key: "skip", Value: *findOptions.Skip})
+		}
+		if findOptions.Sort != nil {
+			cmd = append(cmd, bson.E{Key: "sort", Value: findOptions.Sort})
+		}
+		if findOptions.Projection != nil {
+			cmd = append(cmd, bson.E{Key: "projection", Value: findOptions.Projection})
+		}
+
+		// Execute the command
+		var result bson.M
+		err = m.client.Database(m.DatabaseName).RunCommand(ctx, cmd).Decode(&result)
+		if err != nil {
+			log.Printf("Failed to execute snapshot query with atClusterTime: %v", err)
+			return nil
+		}
+
+		// Extract cursor from result
+		if cursorDoc, ok := result["cursor"].(bson.M); ok {
+			if firstBatch, ok := cursorDoc["firstBatch"].(bson.A); ok {
+				// Convert firstBatch to documents
+				var results []types.Document
+				for _, doc := range firstBatch {
+					if docMap, ok := doc.(bson.M); ok {
+						results = append(results, types.Document(docMap))
+					}
+				}
+				log.Printf("[PROFILE] Query execution with snapshot took %v", time.Since(queryStart))
+				log.Printf("[PROFILE] Decoded %d documents", len(results))
+				return results
+			}
+		}
+		log.Printf("Failed to extract results from snapshot query")
+		return nil
+	}
+
+	// Regular query without snapshot read concern
+	cursor, err = coll.Find(ctx, filter, &findOptions)
 	if err != nil {
 		log.Printf("Failed to execute query: %v", err)
 		return nil
@@ -317,6 +380,9 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 		recover()
 	}()
 
+	// currentBatch := []types.DBChangeStreamEvent{}
+	// currentBatchTime := primitive.Timestamp{}
+
 	for {
 		select {
 		case <-stopChan:
@@ -329,6 +395,8 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				return
 			}
 
+			// if there is no change incoming return and wait for next one
+			// as next blocks while not receiving a change we can return here and wait for it with the background context
 			if !changeStream.Next(context.Background()) {
 				if err := changeStream.Err(); err != nil {
 					log.Printf("Change stream error for %s: %v", mongoUrl, err)
@@ -336,10 +404,19 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				return
 			}
 
+			// Decode the change event
 			var changeEvent bson.M
 			if err := changeStream.Decode(&changeEvent); err != nil {
 				log.Printf("Failed to decode change event for %s: %v", mongoUrl, err)
 				continue
+			}
+
+			// Extract clusterTime from the change event for snapshot reads
+			var clusterTime *primitive.Timestamp
+			if ct, ok := changeEvent["clusterTime"].(primitive.Timestamp); ok {
+				clusterTime = &ct
+			} else {
+				log.Printf("Warning: Failed to extract clusterTime from change event for %s", mongoUrl)
 			}
 
 			// Extract operation type
@@ -390,27 +467,22 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				fullDocumentBeforeChange = preImage
 			}
 
-			// Start a session with snapshot read concern for this change event
-			// This ensures consistent reads during patch calculation
-			session, err := m.client.StartSession()
-			if err != nil {
-				log.Printf("Failed to start session for change event %s: %v", id, err)
-				continue
+			// Extract clusterTime timestamp from the change event
+			var timestamp time.Time
+			if clusterTime, exists := changeEvent["clusterTime"]; exists {
+				if ts, ok := clusterTime.(primitive.Timestamp); ok {
+					// Convert BSON timestamp to Unix time (T is the seconds component)
+					timestamp = time.Unix(int64(ts.T), 0)
+				} else {
+					// Fallback to current time if conversion fails
+					log.Printf("Failed to convert clusterTime to time for %s", mongoUrl)
+					timestamp = time.Now()
+				}
+			} else {
+				// Fallback to current time if clusterTime is not present
+				log.Printf("No clusterTime found in change event for %s", mongoUrl)
+				timestamp = time.Now()
 			}
-
-			// Set transaction options with snapshot read concern
-			txnOpts := options.Transaction().
-				SetReadConcern(readconcern.Snapshot())
-
-			// Start transaction
-			if err := session.StartTransaction(txnOpts); err != nil {
-				log.Printf("Failed to start transaction for change event %s: %v", id, err)
-				session.EndSession(context.Background())
-				continue
-			}
-
-			// Create session context for queries
-			sessionCtx := mongo.NewSessionContext(context.Background(), session)
 
 			// Create and send change event
 			event := types.DBChangeStreamEvent{
@@ -421,9 +493,8 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				FullUpdate:               changeEvent,
 				FullDocument:             fullDocument,
 				FullDocumentBeforeChange: fullDocumentBeforeChange,
-				Timestamp:                time.Now(),
-				Session:                  session,
-				SessionContext:           sessionCtx,
+				Timestamp:                timestamp,
+				ClusterTime:              clusterTime,
 				UpdateCache:              make(map[int]types.Document),
 			}
 
@@ -432,9 +503,6 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 				// log.Printf("Sent change event for %s: %s", mongoUrl, operation)
 			case <-stopChan:
 				log.Printf("Change stream for %s stopped while sending event", mongoUrl)
-				// Clean up session if we're stopping
-				session.AbortTransaction(context.Background())
-				session.EndSession(context.Background())
 				return
 			}
 		}

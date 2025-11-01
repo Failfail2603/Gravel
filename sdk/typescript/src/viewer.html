@@ -660,7 +660,7 @@
             lastUpdate = await response.json();
 
             // Wait 1 second for changes to propagate
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await new Promise((resolve) => setTimeout(resolve, 5000));
 
             // Fetch data from both endpoints
             const [response1, response2] = await Promise.all([

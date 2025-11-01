@@ -1,6 +1,7 @@
 package relevant_changes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"gravel/db"
@@ -140,8 +141,10 @@ func GetSingleDocumentOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery
 		return nil
 	}
 
-	// query the new document using session context if available
-	documents := dbService.Connection.QueryWithContext(change.SessionContext, watchQuery.Collection, watchQuery.Query, string(optionsJSON))
+	// query the new document using snapshot read concern at the change event's cluster time
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	documents := dbService.Connection.QueryWithEvent(ctx, change, watchQuery.Collection, watchQuery.Query, string(optionsJSON))
 
 	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
 	if len(documents) == 0 {
