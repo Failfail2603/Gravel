@@ -19,6 +19,19 @@ func getSimpleUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, up
 	if mapVal, ok := update.Value.(map[string]interface{}); ok {
 		log.Println("found object in patched value")
 		value, _ = dbService.Connection.ProjectDocument(types.Document(mapVal), watchQuery.Options, update.Field)
+	} else if arrayVal, ok := update.Value.([]interface{}); ok {
+		log.Println("found array in patched value. Checking each subvalue for projection")
+		// Project each element in the array if it's a document
+		projectedArray := make([]interface{}, len(arrayVal))
+		for i, elem := range arrayVal {
+			if elemMap, ok := elem.(map[string]interface{}); ok {
+				projectedDoc, _ := dbService.Connection.ProjectDocument(types.Document(elemMap), watchQuery.Options, update.Field)
+				projectedArray[i] = projectedDoc
+			} else {
+				projectedArray[i] = elem
+			}
+		}
+		value = projectedArray
 	} else {
 		log.Println("found primitive in patched value")
 	}
