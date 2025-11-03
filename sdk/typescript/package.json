@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "start": "npx tsx src/index.ts",
+    "start": "npx tsx src/testing/server.ts",
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "jest",

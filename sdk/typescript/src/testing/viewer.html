@@ -166,43 +166,6 @@
       .btn.secondary:hover {
         background-color: #0b7dda;
       }
-      .query-builder {
-        background-color: #f9f9f9;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        padding: 15px;
-        margin-bottom: 20px;
-      }
-      .query-builder h3 {
-        margin-top: 0;
-        font-size: 16px;
-        color: #333;
-      }
-      .form-group {
-        margin-bottom: 15px;
-      }
-      .form-group label {
-        display: block;
-        margin-bottom: 5px;
-        font-weight: 600;
-        font-size: 14px;
-        color: #555;
-      }
-      .form-group textarea {
-        width: 100%;
-        min-height: 100px;
-        padding: 10px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-family: "Consolas", "Monaco", monospace;
-        font-size: 13px;
-        resize: vertical;
-        box-sizing: border-box;
-      }
-      .form-group textarea:focus {
-        outline: none;
-        border-color: #4caf50;
-      }
       .btn-group {
         display: flex;
         gap: 10px;
@@ -250,35 +213,17 @@
       <h1>🗄️ Gravel Real-Time Data Viewer</h1>
       <div id="status" class="status connected">Ready to compare endpoints</div>
 
-      <!-- Query Builder Section -->
-      <div class="query-builder">
-        <h3>🔧 Query Builder</h3>
-        <div class="form-group">
-          <label for="queryInput">MongoDB Query (JSON):</label>
-          <textarea
-            id="queryInput"
-            placeholder='{"debitor": {"$lte": 10000}}'
-          ></textarea>
-        </div>
-        <div class="form-group">
-          <label for="optionsInput">Query Options (JSON):</label>
-          <textarea
-            id="optionsInput"
-            placeholder='{"sort": {"debitor": -1}, "limit": 20, "skip": 0, "projection": {"_id": 1, "email": 1}}'
-          ></textarea>
-        </div>
-        <div class="btn-group">
-          <button class="btn secondary" onclick="loadCurrentQuery()">
-            📥 Load Current Query
-          </button>
-          <button class="btn" onclick="setQuery()">🚀 Apply Query</button>
-          <button class="btn" id="compareBtn" onclick="fetchData()">
-            Refetch
-          </button>
-          <button class="btn warning" onclick="makeRandomUpdate()">
-            🎲 Random Update
-          </button>
-        </div>
+      <!-- Controls -->
+      <div class="btn-group" style="margin-bottom: 20px;">
+        <button class="btn" id="compareBtn" onclick="fetchData()">
+          🔄 Refetch Data
+        </button>
+        <button class="btn warning" onclick="makeRandomUpdate()">
+          🎲 Random Update
+        </button>
+        <button class="btn warning" onclick="regenerateDatabase()">
+          🔄 Regenerate DB (500k)
+        </button>
       </div>
 
       <!-- Update Notification -->
@@ -334,6 +279,115 @@
         return flattened;
       }
 
+      // Deep equality comparison that ignores object key order
+      function deepEqual(obj1, obj2, path = "") {
+        // Handle null/undefined
+        if (obj1 === obj2) return { equal: true };
+        if (obj1 == null || obj2 == null) {
+          return {
+            equal: false,
+            path,
+            reason: `null/undefined mismatch: ${obj1} vs ${obj2}`,
+          };
+        }
+
+        // Handle different types
+        if (typeof obj1 !== typeof obj2) {
+          return {
+            equal: false,
+            path,
+            reason: `Type mismatch: ${typeof obj1} vs ${typeof obj2}`,
+          };
+        }
+
+        // Handle primitives
+        if (typeof obj1 !== "object") {
+          // Special handling for ISO date strings
+          if (typeof obj1 === "string" && typeof obj2 === "string") {
+            const date1 = new Date(obj1);
+            const date2 = new Date(obj2);
+            
+            // Check if both are valid dates
+            if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
+              const equal = date1.getTime() === date2.getTime();
+              return {
+                equal,
+                path,
+                reason: equal ? null : `Date mismatch: ${obj1} vs ${obj2}`,
+              };
+            }
+          }
+          
+          return {
+            equal: obj1 === obj2,
+            path,
+            reason: obj1 === obj2 ? null : `Value mismatch: ${obj1} vs ${obj2}`,
+          };
+        }
+
+        // Handle arrays
+        if (Array.isArray(obj1) && Array.isArray(obj2)) {
+          if (obj1.length !== obj2.length) {
+            return {
+              equal: false,
+              path,
+              reason: `Array length mismatch: ${obj1.length} vs ${obj2.length}`,
+            };
+          }
+
+          for (let i = 0; i < obj1.length; i++) {
+            const result = deepEqual(
+              obj1[i],
+              obj2[i],
+              path ? `${path}[${i}]` : `[${i}]`,
+            );
+            if (!result.equal) return result;
+          }
+
+          return { equal: true };
+        }
+
+        // Handle objects - compare all keys regardless of order
+        if (Array.isArray(obj1) !== Array.isArray(obj2)) {
+          return {
+            equal: false,
+            path,
+            reason: "One is array, other is object",
+          };
+        }
+
+        const keys1 = Object.keys(obj1);
+        const keys2 = Object.keys(obj2);
+
+        if (keys1.length !== keys2.length) {
+          return {
+            equal: false,
+            path,
+            reason: `Different number of keys: ${keys1.length} vs ${keys2.length}`,
+          };
+        }
+
+        const allKeys = new Set([...keys1, ...keys2]);
+        for (const key of allKeys) {
+          if (!obj1.hasOwnProperty(key) || !obj2.hasOwnProperty(key)) {
+            return {
+              equal: false,
+              path: path ? `${path}.${key}` : key,
+              reason: `Key "${key}" missing in one object`,
+            };
+          }
+
+          const result = deepEqual(
+            obj1[key],
+            obj2[key],
+            path ? `${path}.${key}` : key,
+          );
+          if (!result.equal) return result;
+        }
+
+        return { equal: true };
+      }
+
       function compareData(data1, data2) {
         const differences = [];
 
@@ -370,23 +424,9 @@
               `Row ${i}: Missing in /simplequery but exists in /data`,
             );
           } else {
-            const flat1 = flattenObject(item1);
-            const flat2 = flattenObject(item2);
-
-            const allKeys = new Set([
-              ...Object.keys(flat1),
-              ...Object.keys(flat2),
-            ]);
-
-            for (const key of allKeys) {
-              const val1 = flat1[key];
-              const val2 = flat2[key];
-
-              if (val1 !== val2) {
-                differences.push(
-                  `Row ${i}, Field "${key}": /data="${val1}" vs /simplequery="${val2}"`,
-                );
-              }
+            const result = deepEqual(item1, item2, `Row ${i}`);
+            if (!result.equal) {
+              differences.push(`${result.path}: ${result.reason}`);
             }
           }
         }
@@ -534,92 +574,59 @@
         }
       }
 
-      // Load current query from server
-      async function loadCurrentQuery() {
+      // Regenerate the database with 500k items
+      async function regenerateDatabase() {
+        const confirmRegen = confirm(
+          "Are you sure you want to regenerate the database with 500,000 items? This will delete all existing data.",
+        );
+
+        if (!confirmRegen) {
+          return;
+        }
+
         try {
-          const response = await fetch("/getquery");
-          const data = await response.json();
-
-          document.getElementById("queryInput").value = JSON.stringify(
-            data.query,
-            null,
-            2,
-          );
-          document.getElementById("optionsInput").value = JSON.stringify(
-            data.options,
-            null,
-            2,
-          );
-
           document.getElementById("status").className = "status connected";
-          document.getElementById("status").textContent =
-            "Current query loaded successfully";
-        } catch (error) {
-          console.error("Error loading query:", error);
-          document.getElementById("status").className = "status error";
           document.getElementById(
             "status",
-          ).textContent = `Error loading query: ${error.message}`;
-        }
-      }
+          ).textContent = "Regenerating database with 500,000 items...";
 
-      // Set new query on server
-      async function setQuery() {
-        try {
-          const queryText = document.getElementById("queryInput").value.trim();
-          const optionsText = document
-            .getElementById("optionsInput")
-            .value.trim();
-
-          // Parse JSON
-          let query = {};
-          let options = {};
-
-          if (queryText) {
-            try {
-              query = JSON.parse(queryText);
-            } catch (e) {
-              throw new Error("Invalid JSON in query field: " + e.message);
-            }
-          }
-
-          if (optionsText) {
-            try {
-              options = JSON.parse(optionsText);
-            } catch (e) {
-              throw new Error("Invalid JSON in options field: " + e.message);
-            }
-          }
-
-          // Send to server
-          document.getElementById("status").className = "status connected";
-          document.getElementById("status").textContent = "Applying query...";
-
-          const response = await fetch("/setquery", {
+          const startTime = performance.now();
+          const response = await fetch("/redodb", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ query, options }),
           });
+          const endTime = performance.now();
 
           if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.error || "Failed to set query");
+            throw new Error(errorData.error || "Failed to regenerate database");
           }
 
           const result = await response.json();
+          const durationSeconds = ((endTime - startTime) / 1000).toFixed(2);
 
           document.getElementById("status").className = "status connected";
-          document.getElementById("status").textContent =
-            "Query applied successfully! ✅";
+          document.getElementById(
+            "status",
+          ).textContent = `Database regenerated successfully in ${durationSeconds}s! Refetching data...`;
 
-          // Auto-fetch data after setting query
-          setTimeout(() => {
-            fetchData();
-          }, 500);
+          // Show notification
+          const notificationEl = document.getElementById("updateNotification");
+          notificationEl.innerHTML = `
+            <div class="update-notification" style="background-color: #d4edda; border-color: #28a745;">
+              <h4>✅ Database Regeneration Complete</h4>
+              <p><strong>Duration:</strong> ${durationSeconds} seconds</p>
+              <p><strong>Items Created:</strong> 500,000</p>
+            </div>
+          `;
+
+          // Wait a moment for the database to stabilize, then refetch
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await fetchData();
         } catch (error) {
-          console.error("Error setting query:", error);
+          console.error("Error regenerating database:", error);
           document.getElementById("status").className = "status error";
           document.getElementById(
             "status",
@@ -770,8 +777,7 @@
         }
       }
 
-      // Load current query on page load
-      loadCurrentQuery();
+      // Fetch data on page load
       fetchData();
     </script>
   </body>

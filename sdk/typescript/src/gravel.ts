@@ -19,6 +19,7 @@ export enum GravelDBs {
 
 export interface GravelConnectOptions {
   debugChannelCallback?: (err: NatsError | null, msg: Msg) => void;
+  timeoutMs?: number; // Connection timeout in milliseconds (default: 10000)
 }
 
 // Conditional type mapping for database clients
@@ -63,11 +64,21 @@ const databaseClients: Map<string, GravelClient> = new Map();
 /**
  * Connects to Gravel initially and returns a NatsConnection
  *
- * @param options - Optional options for the connection
+ * @param timeoutMs - Timeout in milliseconds (default: 10000)
  * @returns A Promise that resolves to a NatsConnection
+ * @throws Error if connection times out
  */
-async function connectToGravel(): Promise<NatsConnection> {
-  const natsConnection = await connect();
+async function connectToGravel(timeoutMs: number = 10000): Promise<NatsConnection> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Gravel connection timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  const natsConnection = await Promise.race([
+    connect(),
+    timeoutPromise,
+  ]);
 
   return natsConnection;
 }
@@ -79,7 +90,7 @@ export async function getGravelConnection(
     return gravelInstance;
   }
 
-  const natsConnection = await connectToGravel();
+  const natsConnection = await connectToGravel(gravelOptions?.timeoutMs);
 
   gravelInstance = {
     getDatabaseClient: <T extends GravelDBs>(
