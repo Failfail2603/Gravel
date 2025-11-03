@@ -66,7 +66,7 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	}
 
 	// in the case of a finite window we need to check if the document would fall into the window
-	// check if above the window and can be even above the window if nothing can be above the window
+	// check if above the window can even exist
 	if watchQuery.QueryInformation.WindowStart != 0 {
 		positionRelativeToFirst := dbService.Connection.GetSortingOrder(documentInfo, watchQuery.WatchedDocuments[0], watchQuery.QueryInformation)
 
@@ -84,6 +84,12 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 		return []json_patch.JSONPatch{}
 	}
 
+	// add a remove patch for the last document
+	patches := []json_patch.JSONPatch{}
+	patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+
 	// at this point the document is definitely in the window, so we can just add it
-	return addDocumentToWindow(dbService, watchQuery, change, documentInfo)
+	patches = append(patches, addDocumentToWindow(dbService, watchQuery, change, documentInfo)...)
+
+	return patches
 }
