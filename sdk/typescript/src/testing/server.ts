@@ -1,7 +1,7 @@
 import express from "express";
 import { PORT } from "./config.js";
 import { restartWatchQuery, stopWatchQuery } from "./gravelClient.js";
-import { closeMongoClient } from "./mongoClient.js";
+import { closeMongoClient, getMongoClient } from "./mongoClient.js";
 import { router } from "./routes.js";
 
 const app = express();
@@ -18,6 +18,12 @@ app.listen(PORT, () => {
 });
 
 async function startTest() {
+  const mongoClient = await getMongoClient();
+
+  const col = mongoClient.db().collection("users");
+
+  await col.createIndex({ debitor: 1 });
+
   await restartWatchQuery();
 
   // Handle Ctrl+C gracefully

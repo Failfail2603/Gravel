@@ -214,7 +214,7 @@
       <div id="status" class="status connected">Ready to compare endpoints</div>
 
       <!-- Controls -->
-      <div class="btn-group" style="margin-bottom: 20px;">
+      <div class="btn-group" style="margin-bottom: 20px">
         <button class="btn" id="compareBtn" onclick="fetchData()">
           🔄 Refetch Data
         </button>
@@ -306,7 +306,7 @@
           if (typeof obj1 === "string" && typeof obj2 === "string") {
             const date1 = new Date(obj1);
             const date2 = new Date(obj2);
-            
+
             // Check if both are valid dates
             if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
               const equal = date1.getTime() === date2.getTime();
@@ -317,7 +317,7 @@
               };
             }
           }
-          
+
           return {
             equal: obj1 === obj2,
             path,
@@ -586,9 +586,8 @@
 
         try {
           document.getElementById("status").className = "status connected";
-          document.getElementById(
-            "status",
-          ).textContent = "Regenerating database with 500,000 items...";
+          document.getElementById("status").textContent =
+            "Regenerating database with 500,000 items...";
 
           const startTime = performance.now();
           const response = await fetch("/redodb", {
@@ -667,7 +666,7 @@
             lastUpdate = await response.json();
 
             // Wait 1 second for changes to propagate
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            await new Promise((resolve) => setTimeout(resolve, 7000));
 
             // Fetch data from both endpoints
             const [response1, response2] = await Promise.all([
@@ -720,34 +719,35 @@
                 } more difference(s)</em></li>`;
               }
 
-              // Build list of updated users
-              let updatesList = "";
-              if (lastUpdate && lastUpdate.updates) {
-                lastUpdate.updates.forEach((update) => {
-                  const fields = update.updatedFields.join(", ");
-                  updatesList += `<li><strong>User:</strong> ${escapeHtml(
-                    String(update._id),
-                  )} (${escapeHtml(
-                    update.email || "N/A",
-                  )}) - <strong>Updated:</strong> ${escapeHtml(fields)}</li>`;
-                });
-              }
-
               notificationEl.innerHTML = `
                 <div class="update-notification">
-                  <h4>✅ Random Updates Complete (${updateCount} update(s) made)</h4>
-                  <p><strong>Summary:</strong></p>
+                  <h4>✅ Random Operations Complete (${updateCount} operation batch(es))</h4>
+                  <p><strong>Operations Performed:</strong></p>
                   <ul>
-                    <li><strong>Documents Updated:</strong> ${escapeHtml(
-                      String(lastUpdate.documentsUpdated),
+                    <li><strong>Updates:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.updates || 0),
                     )}</li>
-                    <li><strong>Total Processed:</strong> ${escapeHtml(
-                      String(lastUpdate.totalDocumentsProcessed),
+                    <li><strong>Deletions:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.deletes || 0),
+                    )}</li>
+                    <li><strong>Insertions:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.inserts || 0),
                     )}</li>
                   </ul>
-                  <p style="margin-top: 10px;"><strong>Updated Users:</strong></p>
-                  <ul style="margin: 5px 0 0 0; padding-left: 20px;">
-                    ${updatesList}
+                  <p style="margin-top: 10px;"><strong>Document Count:</strong></p>
+                  <ul>
+                    <li><strong>Before:</strong> ${escapeHtml(
+                      String(lastUpdate.documentCount?.before || "N/A"),
+                    )}</li>
+                    <li><strong>After:</strong> ${escapeHtml(
+                      String(lastUpdate.documentCount?.after || "N/A"),
+                    )}</li>
+                    <li><strong>Target:</strong> ${escapeHtml(
+                      String(lastUpdate.documentCount?.target || "N/A"),
+                    )}</li>
+                    <li><strong>Delta from Target:</strong> ${escapeHtml(
+                      String(lastUpdate.documentCount?.delta || "N/A"),
+                    )}</li>
                   </ul>
                   <p style="margin-top: 10px;"><strong>Found ${
                     comparison.differences.length

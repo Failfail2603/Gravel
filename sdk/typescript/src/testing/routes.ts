@@ -1,8 +1,23 @@
 import express, { type Request, type Response } from "express";
+import { ObjectId } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
-import { options, query, USE_BULK_OPERATIONS } from "./config.js";
-import { generateRandomUpdateFields } from "./dataGenerators.js";
+import {
+  collectionSize,
+  options,
+  query,
+  type GravelTestData,
+} from "./config.js";
+import {
+  generateRandomAddress,
+  generateRandomBirthday,
+  generateRandomDebitor,
+  generateRandomEmail,
+  generateRandomRoles,
+  generateRandomSepa,
+  generateRandomTags,
+  generateRandomUpdateFields,
+} from "./dataGenerators.js";
 import {
   currentData,
   restartWatchQuery,
@@ -59,16 +74,16 @@ router.get("/simplequery", async (req: Request, res: Response) => {
   }
 });
 
-// API endpoint to make random updates to multiple users with multiple fields
+// API endpoint to make random updates, deletions, and insertions to multiple users
 router.post("/randomupdate", async (req: Request, res: Response) => {
   try {
     // Get singleton MongoDB client
     const client = await getMongoClient();
 
     // Get database and collection
-    const collection = client.db().collection("users");
+    const collection = client.db().collection<GravelTestData>("users");
 
-    // Get total user count to determine how many to update
+    // Get total user count
     const totalUsers = await collection.countDocuments({});
 
     if (totalUsers === 0) {
@@ -76,69 +91,131 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
       return;
     }
 
-    // Determine random number of users to update (1-10% of total, min 1, max 50)
-    const maxUpdates = Math.min(50, Math.max(1, Math.floor(totalUsers / 10)));
-    const numUpdates = Math.floor(Math.random() * maxUpdates) + 1;
+    // Calculate the target size to maintain (within 5% of collectionSize)
+    const targetSize = collectionSize;
+    const sizeDelta = totalUsers - targetSize;
 
-    // Get random users using $sample aggregation
-    const users = await collection
+    // Determine operations distribution
+    const maxOpsPerType = Math.min(
+      50,
+      Math.max(1, Math.floor(totalUsers / 100)),
+    );
+
+    // Calculate number of operations
+    let numDeletes = Math.floor(Math.random() * maxOpsPerType) + 1;
+    let numInserts = Math.floor(Math.random() * maxOpsPerType) + 1;
+    const numUpdates = Math.floor(Math.random() * maxOpsPerType) + 1;
+
+    // Adjust deletions and insertions to maintain size near target
+    if (sizeDelta > 0) {
+      // Too many documents - favor deletions
+      numDeletes = Math.min(
+        numDeletes + Math.floor(sizeDelta * 0.1),
+        maxOpsPerType,
+      );
+      numInserts = Math.max(1, Math.floor(numInserts * 0.5));
+    } else if (sizeDelta < 0) {
+      // Too few documents - favor insertions
+      numInserts = Math.min(
+        numInserts + Math.floor(Math.abs(sizeDelta) * 0.1),
+        maxOpsPerType,
+      );
+      numDeletes = Math.max(1, Math.floor(numDeletes * 0.5));
+    }
+
+    // Ensure we don't delete all documents
+    numDeletes = Math.min(numDeletes, Math.floor(totalUsers * 0.05));
+
+    const bulkOps: any[] = [];
+    const operationStats = {
+      updates: 0,
+      deletes: 0,
+      inserts: 0,
+    };
+
+    // 1. UPDATES - Get random users to update
+    const usersToUpdate = await collection
       .aggregate([{ $sample: { size: numUpdates } }])
       .toArray();
 
-    if (users.length === 0) {
-      res.status(404).json({ error: "No users found to update" });
-      return;
-    }
-
-    let modifiedCount = 0;
-
-    if (USE_BULK_OPERATIONS) {
-      // Prepare bulk write operations
-      const bulkOps = users.map((user) => {
-        const updateFields = generateRandomUpdateFields();
-        return {
-          updateOne: {
-            filter: { _id: user._id },
-            update: {
-              $set: updateFields,
-            },
-          },
-        };
-      });
-
-      // Execute bulk write
-      const bulkResult = await collection.bulkWrite(bulkOps);
-      modifiedCount = bulkResult.modifiedCount;
-    } else {
-      // Execute individual updateOne operations in a loop
-      const result = await collection.updateMany(
-        { _id: { $in: users.map((user) => user._id) } },
-        {
-          $set: {
-            debitor: 10000,
-          },
+    for (const user of usersToUpdate) {
+      const updateFields = generateRandomUpdateFields();
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: user._id },
+          update: { $set: updateFields },
         },
-      );
-      modifiedCount += result.modifiedCount;
+      });
+      operationStats.updates++;
     }
 
-    // Collect update information for response
-    const updateInfo = users.map((user) => ({
-      _id: user._id,
-      email: user.email,
-      updatedFields: ["debitor"],
-    }));
+    // 2. DELETIONS - Get random users to delete
+    const usersToDelete = await collection
+      .aggregate([{ $sample: { size: numDeletes } }])
+      .toArray();
 
-    // Return the update information
+    for (const user of usersToDelete) {
+      bulkOps.push({
+        deleteOne: {
+          filter: { _id: user._id },
+        },
+      });
+      operationStats.deletes++;
+    }
+
+    // 3. INSERTIONS - Create new documents
+    for (let i = 0; i < numInserts; i++) {
+      const newDocument: GravelTestData = {
+        _id: new ObjectId(),
+        email: generateRandomEmail(),
+        roles: generateRandomRoles(),
+        address: generateRandomAddress(),
+        debitor: generateRandomDebitor(),
+        tags: generateRandomTags(),
+        sepa: generateRandomSepa(),
+      };
+
+      // Optional fields - 50% chance for archived
+      if (Math.random() > 0.5) {
+        newDocument.archived = Math.random() > 0.5;
+      }
+
+      // Optional fields - 70% chance for birthday
+      if (Math.random() > 0.3) {
+        newDocument.birthday = generateRandomBirthday();
+      }
+
+      bulkOps.push({
+        insertOne: {
+          document: newDocument,
+        },
+      });
+      operationStats.inserts++;
+    }
+
+    // Execute bulk write operations
+    const bulkResult = await collection.bulkWrite(bulkOps, { ordered: false });
+
+    // Get updated count
+    const newTotalUsers = await collection.countDocuments({});
+
+    // Return the operation information
     res.json({
       success: true,
-      documentsUpdated: modifiedCount,
-      totalDocumentsProcessed: users.length,
-      updates: updateInfo,
-      method: USE_BULK_OPERATIONS ? "bulk" : "loop",
+      operations: {
+        updates: bulkResult.modifiedCount || 0,
+        deletes: bulkResult.deletedCount || 0,
+        inserts: bulkResult.insertedCount || 0,
+      },
+      documentCount: {
+        before: totalUsers,
+        after: newTotalUsers,
+        target: targetSize,
+        delta: newTotalUsers - targetSize,
+      },
     });
   } catch (error) {
-    console.error("Random update error:", error);
+    console.error("Random operations error:", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
     });
@@ -148,7 +225,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
 router.post("/redodb", async (req: Request, res: Response) => {
   try {
     await stopWatchQuery();
-    await regenerateDatabase(500000);
+    await regenerateDatabase(collectionSize);
     await restartWatchQuery();
     res.json({ success: true });
   } catch (error) {

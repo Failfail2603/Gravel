@@ -4,6 +4,7 @@ import type { GravelMongoWatchQueryFindOptions } from "../db/mongo.js";
 export const PORT = 3000;
 export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
+export const collectionSize = 500000;
 
 export interface GravelTestData {
   _id: ObjectId;
@@ -45,7 +46,6 @@ export const query: any = {
 
 export const options: GravelMongoWatchQueryFindOptions = {
   sort: {
-    debitor: -1,
     _id: -1,
   },
   skip: 70000,

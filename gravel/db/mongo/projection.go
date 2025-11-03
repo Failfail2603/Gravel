@@ -3,6 +3,8 @@ package mongo
 import (
 	"gravel/types"
 	"strings"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func applyProjection(doc types.Document, options string, nestedPath string) (types.Document, error) {
@@ -39,9 +41,6 @@ func applyProjection(doc types.Document, options string, nestedPath string) (typ
 		}
 	}
 
-	// flatten nested projection object into dot notation field paths
-	fieldPaths := flattenObject(projection)
-
 	// determine if _id is explicitly excluded
 	includeID := true
 	if idVal, exists := projection["_id"]; exists {
@@ -55,14 +54,24 @@ func applyProjection(doc types.Document, options string, nestedPath string) (typ
 	// create a new document with only the projected fields (inclusion projection)
 	result := make(types.Document)
 
-	for _, field := range fieldPaths {
+	// apply projection by walking the projection tree
+	for field, projValue := range projection {
 		if field == "_id" {
 			continue // handle _id separately
 		}
 
-		// handle nested fields using dot notation
-		if val := getNestedValue(doc, field); val != nil {
-			setNestedValue(result, field, val)
+		// get the value from the document
+		val, exists := doc[field]
+		if !exists {
+			continue
+		}
+
+		// check if this is a sub-projection (nested object)
+		if subProj, ok := projValue.(map[string]interface{}); ok && len(subProj) > 0 {
+			result[field] = applyProjectionToValue(val, subProj)
+		} else {
+			// primitive projection (1, 0, true, false) - include the field as is
+			result[field] = val
 		}
 	}
 
@@ -76,60 +85,80 @@ func applyProjection(doc types.Document, options string, nestedPath string) (typ
 	return result, nil
 }
 
-// getNestedValue retrieves a value from a nested document using dot notation
-// Example: getNestedValue(doc, "user.name") returns the value at doc["user"]["name"]
-func getNestedValue(doc types.Document, path string) interface{} {
-	parts := strings.Split(path, ".")
+// applyProjectionToValue applies a projection to any value (array, document, or primitive)
+// Handles both MongoDB primitive types (primitive.A, primitive.M) and regular Go types ([]interface{}, map[string]interface{})
+func applyProjectionToValue(val interface{}, projection map[string]interface{}) interface{} {
 
-	var current interface{} = doc
-	for _, part := range parts {
-		// check if current is a map
-		if m, ok := current.(types.Document); ok {
-			val, exists := m[part]
-			if !exists {
-				return nil
-			}
-			current = val
-		} else {
-			return nil
+	// handle arrays: check both primitive.A (from MongoDB) and []interface{} (from Go)
+	if arr, ok := val.(primitive.A); ok {
+		// MongoDB primitive.A type
+		projectedArray := make([]interface{}, 0, len(arr))
+		for _, elem := range arr {
+			projectedArray = append(projectedArray, applyProjectionToElement(elem, projection))
 		}
+		return projectedArray
 	}
 
-	return current
+	if arr, ok := val.([]interface{}); ok {
+		// Regular Go []interface{} type
+		projectedArray := make([]interface{}, 0, len(arr))
+		for _, elem := range arr {
+			projectedArray = append(projectedArray, applyProjectionToElement(elem, projection))
+		}
+		return projectedArray
+	}
+
+	// handle nested documents: check both primitive.M (from MongoDB) and map[string]interface{} (from Go)
+	if nestedDoc, ok := val.(primitive.M); ok {
+		// MongoDB primitive.M type - convert to map[string]interface{}
+		return applySubProjection(map[string]interface{}(nestedDoc), projection)
+	}
+
+	if nestedDoc, ok := val.(map[string]interface{}); ok {
+		// Regular Go map[string]interface{} type
+		return applySubProjection(nestedDoc, projection)
+	}
+
+	// for any other type, return as is
+	return val
 }
 
-// setNestedValue sets a value in a nested document using dot notation
-// Example: setNestedValue(doc, "user.name", "John") sets doc["user"]["name"] = "John"
-func setNestedValue(doc types.Document, path string, value interface{}) {
-	parts := strings.Split(path, ".")
-
-	// if it's a simple field (no dots), just set it directly
-	if len(parts) == 1 {
-		doc[parts[0]] = value
-		return
+// applyProjectionToElement applies a projection to a single array element
+func applyProjectionToElement(elem interface{}, projection map[string]interface{}) interface{} {
+	// Check for primitive.M (MongoDB document)
+	if elemDoc, ok := elem.(primitive.M); ok {
+		return applySubProjection(map[string]interface{}(elemDoc), projection)
 	}
 
-	// navigate/create nested structure
-	current := doc
-	for i := 0; i < len(parts)-1; i++ {
-		part := parts[i]
+	// Check for map[string]interface{} (regular Go document)
+	if elemDoc, ok := elem.(map[string]interface{}); ok {
+		return applySubProjection(elemDoc, projection)
+	}
 
-		// check if the key exists and is a map
-		if existing, exists := current[part]; exists {
-			if m, ok := existing.(map[string]interface{}); ok {
-				current = m
-				continue
-			}
+	// non-document elements are included as is
+	return elem
+}
+
+// applySubProjection applies a projection to a document (used for nested documents and array elements)
+func applySubProjection(doc map[string]interface{}, projection map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	for field, projValue := range projection {
+		val, exists := doc[field]
+		if !exists {
+			continue
 		}
 
-		// create a new nested map
-		newMap := make(map[string]interface{})
-		current[part] = newMap
-		current = newMap
+		// check if this is a sub-projection (nested object)
+		if subProj, ok := projValue.(map[string]interface{}); ok && len(subProj) > 0 {
+			result[field] = applyProjectionToValue(val, subProj)
+		} else {
+			// primitive projection - include the field as is
+			result[field] = val
+		}
 	}
 
-	// set the final value
-	current[parts[len(parts)-1]] = value
+	return result
 }
 
 // extractNestedProjection extracts a nested projection object at the given dot-notation path
