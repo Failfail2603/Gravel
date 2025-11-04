@@ -2,6 +2,7 @@ import patch, { type Operation } from "fast-json-patch";
 import type { Msg, NatsError } from "nats";
 import { getGravelConnection, GravelDBs } from "../gravel.js";
 import { MONGO_URL, options, query } from "./config.js";
+import { addGravelUpdates } from "./metrics.js";
 
 let gravel: Awaited<ReturnType<typeof getGravelConnection>> | null = null;
 let gravelMongoClient: any = null;
@@ -74,6 +75,9 @@ export async function restartWatchQuery() {
   changes.subscribe((patches: Operation[]) => {
     // Apply JSON patches to the current data
     console.log(JSON.stringify(patches, null, 2));
+    if (patches.length > 0) {
+      addGravelUpdates(1, JSON.stringify(patches).length);
+    }
     const patchResult = patch.applyPatch(
       currentData,
       patches as Operation[],

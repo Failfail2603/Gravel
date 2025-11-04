@@ -1,7 +1,8 @@
 import express from "express";
-import { PORT } from "./config.js";
+import { options, PORT, query } from "./config.js";
 import { restartWatchQuery, stopWatchQuery } from "./gravelClient.js";
 import { closeMongoClient, getMongoClient } from "./mongoClient.js";
+import { stopOldWatchQuery, watchQuery } from "./oldWatchQuery.js";
 import { router } from "./routes.js";
 
 const app = express();
@@ -26,14 +27,26 @@ async function startTest() {
 
   await restartWatchQuery();
 
+  watchQuery("users", query, options).subscribe((data) => {});
+
   // Handle Ctrl+C gracefully
   process.on("SIGINT", async () => {
     console.log("\nReceived SIGINT (Ctrl+C). Stopping gracefully...");
-    if (stopWatchQuery) {
-      await stopWatchQuery();
+    try {
+      // Stop the Gravel client watch query
+      if (stopWatchQuery) {
+        await stopWatchQuery();
+      }
+      // Stop the old watch query system
+      await stopOldWatchQuery();
+      // Close MongoDB client
+      await closeMongoClient();
+      console.log("All systems stopped successfully.");
+      process.exit(0);
+    } catch (error) {
+      console.error("Error during shutdown:", error);
+      process.exit(1);
     }
-    await closeMongoClient();
-    process.exit(0);
   });
 
   // Keep the process running

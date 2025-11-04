@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gravel Data Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
       body {
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
@@ -206,6 +207,22 @@
           transform: translateY(0);
         }
       }
+      .metrics-section {
+        margin-bottom: 30px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 20px;
+        background: white;
+      }
+      .metrics-section h2 {
+        margin-top: 0;
+        color: #333;
+      }
+      .chart-container {
+        position: relative;
+        height: 300px;
+        margin-top: 15px;
+      }
     </style>
   </head>
   <body>
@@ -229,6 +246,22 @@
       <!-- Update Notification -->
       <div id="updateNotification"></div>
 
+      <!-- Metrics Graph Section -->
+      <div class="metrics-section">
+        <h2>📊 Real-Time Metrics - Updates</h2>
+        <div class="chart-container">
+          <canvas id="metricsChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Bytes Metrics Graph Section -->
+      <div class="metrics-section">
+        <h2>📊 Real-Time Metrics - Bytes</h2>
+        <div class="chart-container">
+          <canvas id="bytesChart"></canvas>
+        </div>
+      </div>
+
       <!-- Controls Section -->
       <div class="controls" style="display: none"></div>
 
@@ -251,6 +284,212 @@
       let lastDataHash2 = "";
       let currentData1 = null;
       let currentData2 = null;
+
+      // Metrics chart variables
+      let metricsChart = null;
+      let bytesChart = null;
+      const maxDataPoints = 30;
+      const metricsHistory = {
+        timestamps: [],
+        databaseUpdates: [],
+        gravelUpdates: [],
+        oldWatchQueryUpdates: [],
+        gravelBytes: [],
+        oldWatchQueryBytes: [],
+      };
+
+      // Initialize metrics chart
+      function initMetricsChart() {
+        const ctx = document.getElementById("metricsChart").getContext("2d");
+        metricsChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Database Updates",
+                data: [],
+                borderColor: "#4caf50",
+                backgroundColor: "rgba(76, 175, 80, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Gravel Updates",
+                data: [],
+                borderColor: "#2196f3",
+                backgroundColor: "rgba(33, 150, 243, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Old Watch Query Updates",
+                data: [],
+                borderColor: "#ff9800",
+                backgroundColor: "rgba(255, 152, 0, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Time",
+                },
+              },
+              y: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Updates Count",
+                },
+                beginAtZero: true,
+              },
+            },
+            plugins: {
+              legend: {
+                display: true,
+                position: "top",
+              },
+              tooltip: {
+                mode: "index",
+                intersect: false,
+              },
+            },
+            interaction: {
+              mode: "nearest",
+              axis: "x",
+              intersect: false,
+            },
+          },
+        });
+      }
+
+      // Initialize bytes chart
+      function initBytesChart() {
+        const ctx = document.getElementById("bytesChart").getContext("2d");
+        bytesChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Gravel Bytes",
+                data: [],
+                borderColor: "#2196f3",
+                backgroundColor: "rgba(33, 150, 243, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Old Watch Query Bytes",
+                data: [],
+                borderColor: "#ff9800",
+                backgroundColor: "rgba(255, 152, 0, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Time",
+                },
+              },
+              y: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Bytes",
+                },
+                beginAtZero: true,
+              },
+            },
+            plugins: {
+              legend: {
+                display: true,
+                position: "top",
+              },
+              tooltip: {
+                mode: "index",
+                intersect: false,
+              },
+            },
+            interaction: {
+              mode: "nearest",
+              axis: "x",
+              intersect: false,
+            },
+          },
+        });
+      }
+
+      // Fetch and update metrics
+      async function updateMetrics() {
+        try {
+          const response = await fetch("/metrics");
+          if (!response.ok) {
+            console.error("Failed to fetch metrics:", response.status);
+            return;
+          }
+
+          const metrics = await response.json();
+          const now = new Date();
+          const timeLabel = now.toLocaleTimeString();
+
+          // Add new data point
+          metricsHistory.timestamps.push(timeLabel);
+          metricsHistory.databaseUpdates.push(metrics.databaseUpdates || 0);
+          metricsHistory.gravelUpdates.push(metrics.gravelUpdates || 0);
+          metricsHistory.oldWatchQueryUpdates.push(
+            metrics.oldWatchQueryUpdates || 0,
+          );
+          metricsHistory.gravelBytes.push(metrics.gravelBytes || 0);
+          metricsHistory.oldWatchQueryBytes.push(
+            metrics.oldWatchQueryBytes || 0,
+          );
+
+          // Limit the number of data points
+          if (metricsHistory.timestamps.length > maxDataPoints) {
+            metricsHistory.timestamps.shift();
+            metricsHistory.databaseUpdates.shift();
+            metricsHistory.gravelUpdates.shift();
+            metricsHistory.oldWatchQueryUpdates.shift();
+            metricsHistory.gravelBytes.shift();
+            metricsHistory.oldWatchQueryBytes.shift();
+          }
+
+          // Update updates chart
+          metricsChart.data.labels = metricsHistory.timestamps;
+          metricsChart.data.datasets[0].data = metricsHistory.databaseUpdates;
+          metricsChart.data.datasets[1].data = metricsHistory.gravelUpdates;
+          metricsChart.data.datasets[2].data =
+            metricsHistory.oldWatchQueryUpdates;
+          metricsChart.update("none"); // 'none' mode for better performance
+
+          // Update bytes chart
+          bytesChart.data.labels = metricsHistory.timestamps;
+          bytesChart.data.datasets[0].data = metricsHistory.gravelBytes;
+          bytesChart.data.datasets[1].data = metricsHistory.oldWatchQueryBytes;
+          bytesChart.update("none"); // 'none' mode for better performance
+        } catch (error) {
+          console.error("Error updating metrics:", error);
+        }
+      }
+
+      // Removed automatic polling - metrics now update with fetchData
 
       function flattenObject(obj, prefix = "") {
         const flattened = {};
@@ -562,6 +801,9 @@
           console.log("Comparison result:", comparison);
           renderDiffSummary(comparison);
 
+          // Update metrics after fetching data
+          await updateMetrics();
+
           // Update status
           document.getElementById("status").className = "status connected";
           document.getElementById("status").textContent = "Comparison complete";
@@ -665,8 +907,10 @@
 
             lastUpdate = await response.json();
 
+            const WAIT_TIME = 7000;
+
             // Wait 1 second for changes to propagate
-            await new Promise((resolve) => setTimeout(resolve, 7000));
+            await new Promise((resolve) => setTimeout(resolve, WAIT_TIME));
 
             // Fetch data from both endpoints
             const [response1, response2] = await Promise.all([
@@ -692,6 +936,9 @@
             );
 
             updateLastUpdate();
+
+            // Update metrics after fetching data in the loop
+            await updateMetrics();
 
             // Compare the data
             let comparison = compareData(data1, data2);
@@ -777,8 +1024,12 @@
         }
       }
 
-      // Fetch data on page load
-      fetchData();
+      // Initialize on page load
+      window.addEventListener("DOMContentLoaded", () => {
+        initMetricsChart();
+        initBytesChart();
+        fetchData();
+      });
     </script>
   </body>
 </html>

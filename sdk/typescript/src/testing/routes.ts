@@ -5,6 +5,9 @@ import { fileURLToPath } from "url";
 import {
   collectionSize,
   options,
+  overrideDeleteNumber,
+  overrideInsertNumber,
+  overrideUpdateNumber,
   query,
   type GravelTestData,
 } from "./config.js";
@@ -23,6 +26,14 @@ import {
   restartWatchQuery,
   stopWatchQuery,
 } from "./gravelClient.js";
+import {
+  addDataBaseUpdates,
+  databaseUpdates,
+  gravelUpdates,
+  oldWatchQueryUpdates,
+  gravelBytes,
+  oldWatchQueryBytes,
+} from "./metrics.js";
 import { getMongoClient } from "./mongoClient.js";
 import { regenerateDatabase } from "./regenerateDatabase.js";
 
@@ -72,6 +83,16 @@ router.get("/simplequery", async (req: Request, res: Response) => {
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
+});
+
+router.get("/metrics", (req: Request, res: Response) => {
+  res.json({
+    databaseUpdates,
+    gravelUpdates,
+    oldWatchQueryUpdates,
+    gravelBytes,
+    oldWatchQueryBytes,
+  });
 });
 
 // API endpoint to make random updates, deletions, and insertions to multiple users
@@ -135,7 +156,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
 
     // 1. UPDATES - Get random users to update
     const usersToUpdate = await collection
-      .aggregate([{ $sample: { size: numUpdates } }])
+      .aggregate([{ $sample: { size: overrideUpdateNumber ?? numUpdates } }])
       .toArray();
 
     for (const user of usersToUpdate) {
@@ -151,7 +172,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
 
     // 2. DELETIONS - Get random users to delete
     const usersToDelete = await collection
-      .aggregate([{ $sample: { size: numDeletes } }])
+      .aggregate([{ $sample: { size: overrideDeleteNumber ?? numDeletes } }])
       .toArray();
 
     for (const user of usersToDelete) {
@@ -164,7 +185,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
     }
 
     // 3. INSERTIONS - Create new documents
-    for (let i = 0; i < numInserts; i++) {
+    for (let i = 0; i < (overrideInsertNumber ?? numInserts); i++) {
       const newDocument: GravelTestData = {
         _id: new ObjectId(),
         email: generateRandomEmail(),
@@ -198,6 +219,12 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
 
     // Get updated count
     const newTotalUsers = await collection.countDocuments({});
+
+    addDataBaseUpdates(
+      (bulkResult.modifiedCount || 0) +
+        (bulkResult.deletedCount || 0) +
+        (bulkResult.insertedCount || 0),
+    );
 
     // Return the operation information
     res.json({

@@ -1,7 +1,7 @@
 import { MongoClient } from "mongodb";
 import { MONGO_URL } from "./config.js";
 
-let mongoClient: MongoClient | null = null;
+export let mongoClient: MongoClient | null = null;
 
 export async function getMongoClient(): Promise<MongoClient> {
   if (!mongoClient) {

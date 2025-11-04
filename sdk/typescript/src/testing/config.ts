@@ -6,6 +6,10 @@ export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
 export const collectionSize = 500000;
 
+export const overrideUpdateNumber: number | null = 10;
+export const overrideDeleteNumber: number | null = 0;
+export const overrideInsertNumber: number | null = 0;
+
 export interface GravelTestData {
   _id: ObjectId;
   email: string;
@@ -46,10 +50,11 @@ export const query: any = {
 
 export const options: GravelMongoWatchQueryFindOptions = {
   sort: {
+    debitor: 1,
     _id: -1,
   },
-  skip: 70000,
-  limit: 2000,
+  skip: 0,
+  limit: 20,
   projection: {
     _id: 1,
     email: 1,
