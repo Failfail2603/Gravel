@@ -15,7 +15,6 @@ import {
   switchMap,
   throttleTime,
 } from "rxjs/operators";
-import { addOldWatchQueryUpdates } from "./metrics.js";
 import { getMongoClient, mongoClient } from "./mongoClient.js";
 
 let counter = 0;
@@ -70,17 +69,19 @@ const changeStreamSubscription = from(getMongoClient())
   .subscribe({
     next(value) {
       for (const [sessionID, subject] of changeStreamSubjects.entries()) {
-        addOldWatchQueryUpdates(1, JSON.stringify(value).length);
+        subject.next(value);
         // need to push new values to subject in corresponding context in order to maintain initial context of called watchQuery
       }
     },
     complete() {
       for (const [sessionID, subject] of changeStreamSubjects.entries()) {
+        subject.complete();
         // need to push new values to subject in corresponding context in order to maintain initial context of called watchQuery
       }
     },
     error(err) {
       for (const [sessionID, subject] of changeStreamSubjects.entries()) {
+        subject.error(err);
         // need to push new values to subject in corresponding context in order to maintain initial context of called watchQuery
       }
     },
@@ -159,6 +160,7 @@ export function watchQuery<T extends Document>(
             .find(query, options)
             .toArray();
           lastIDs = freshData.map((r) => r._id.toString());
+
           return freshData as unknown as T[];
         }
       }),
@@ -188,11 +190,11 @@ const checkIfChangeIsRelevant = async <T extends { _id: string }>(
     return false;
   if (doc.ns.coll !== collectionName) return false;
 
-  const result = match(query, doc, lastIDs);
-  if (!result) return false;
-
   // want to always update subscription for "deletion" because we cannot determine if deleted doc may influence our current selection (because of sort or skip/limit,...)
   if (doc.operationType === "delete") return true;
+
+  const result = match(query, doc, lastIDs);
+  if (!result) return false;
 
   // this should always be the last check to avoid unnecessary db calls
   const ids = (
@@ -266,23 +268,23 @@ export function getMongoChangeStream() {
  */
 export async function stopOldWatchQuery() {
   console.log("Stopping old watch query system...");
-  
+
   // Complete all active subjects
   for (const [sessionID, subject] of changeStreamSubjects.entries()) {
     subject.complete();
   }
   changeStreamSubjects.clear();
-  
+
   // Unsubscribe from the change stream subscription
   if (changeStreamSubscription && !changeStreamSubscription.closed) {
     changeStreamSubscription.unsubscribe();
   }
-  
+
   // Close the MongoDB change stream
   if (mongoChangeStream) {
     await mongoChangeStream.close();
     mongoChangeStream = null;
   }
-  
+
   console.log("Old watch query system stopped successfully.");
 }

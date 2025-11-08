@@ -72,6 +72,8 @@ export async function restartWatchQuery() {
   // Maintain current state of the data
   currentData = initialQuery;
 
+  addGravelUpdates(1, JSON.stringify(currentData).length);
+
   changes.subscribe((patches: Operation[]) => {
     // Apply JSON patches to the current data
     console.log(JSON.stringify(patches, null, 2));

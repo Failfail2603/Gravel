@@ -99,7 +99,7 @@
       }
       .comparison-container {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 20px;
         margin-top: 20px;
       }
@@ -266,15 +266,22 @@
       <div class="controls" style="display: none"></div>
 
       <div class="last-update" id="lastUpdate"></div>
+
+      <h2 style="margin-top: 30px">Data Comparison</h2>
       <div id="diffSummary"></div>
+      <div id="diffSummary2"></div>
       <div class="comparison-container">
         <div class="data-section">
           <h2>Gravel</h2>
           <div id="tableContainer1"></div>
         </div>
         <div class="data-section">
-          <h2>MongoDB</h2>
+          <h2>MongoDB Direct Query</h2>
           <div id="tableContainer2"></div>
+        </div>
+        <div class="data-section">
+          <h2>Old WatchQuery</h2>
+          <div id="tableContainer3"></div>
         </div>
       </div>
     </div>
@@ -282,8 +289,10 @@
     <script>
       let lastDataHash1 = "";
       let lastDataHash2 = "";
+      let lastDataHash3 = "";
       let currentData1 = null;
       let currentData2 = null;
+      let currentData3 = null;
 
       // Metrics chart variables
       let metricsChart = null;
@@ -746,8 +755,8 @@
         ).textContent = `Last updated: ${now.toLocaleTimeString()}`;
       }
 
-      function renderDiffSummary(comparison) {
-        const diffSummaryEl = document.getElementById("diffSummary");
+      function renderDiffSummary(comparison, summaryElementId = "diffSummary") {
+        const diffSummaryEl = document.getElementById(summaryElementId);
 
         if (comparison.differences.length === 0) {
           diffSummaryEl.innerHTML = `<div class="diff-summary" style="background-color: #d4edda; border-color: #28a745;"><strong>✅ ${comparison.message}</strong></div>`;
@@ -768,10 +777,11 @@
 
       async function fetchData() {
         try {
-          // Fetch from both endpoints
-          const [response1, response2] = await Promise.all([
+          // Fetch from all endpoints
+          const [response1, response2, response3] = await Promise.all([
             fetch("/data"),
             fetch("/simplequery"),
+            fetch("/oldwatchquery"),
           ]);
 
           if (!response1.ok) {
@@ -780,9 +790,15 @@
           if (!response2.ok) {
             throw new Error(`/simplequery error! status: ${response2.status}`);
           }
+          if (!response3.ok) {
+            throw new Error(
+              `/oldwatchquery error! status: ${response3.status}`,
+            );
+          }
 
           const data1 = await response1.json();
           const data2 = (await response2.json()).result;
+          const data3 = await response3.json();
 
           // Always update tables with current data
           document.getElementById("tableContainer1").innerHTML = createTable(
@@ -793,13 +809,22 @@
             data2,
             "/simplequery",
           );
+          document.getElementById("tableContainer3").innerHTML = createTable(
+            data3,
+            "/oldwatchquery",
+          );
 
           updateLastUpdate();
 
-          // Compare the two endpoints against each other
-          const comparison = compareData(data1, data2);
-          console.log("Comparison result:", comparison);
-          renderDiffSummary(comparison);
+          // Compare Gravel vs MongoDB
+          const comparison1 = compareData(data1, data2);
+          console.log("Gravel vs MongoDB comparison:", comparison1);
+          renderDiffSummary(comparison1, "diffSummary");
+
+          // Compare oldWatchQuery vs MongoDB
+          const comparison2 = compareData(data3, data2);
+          console.log("OldWatchQuery vs MongoDB comparison:", comparison2);
+          renderDiffSummary(comparison2, "diffSummary2");
 
           // Update metrics after fetching data
           await updateMetrics();
@@ -907,23 +932,25 @@
 
             lastUpdate = await response.json();
 
-            const WAIT_TIME = 7000;
+            const WAIT_TIME = 10000;
 
             // Wait 1 second for changes to propagate
             await new Promise((resolve) => setTimeout(resolve, WAIT_TIME));
 
-            // Fetch data from both endpoints
-            const [response1, response2] = await Promise.all([
+            // Fetch data from all endpoints
+            const [response1, response2, response3] = await Promise.all([
               fetch("/data"),
               fetch("/simplequery"),
+              fetch("/oldwatchquery"),
             ]);
 
-            if (!response1.ok || !response2.ok) {
+            if (!response1.ok || !response2.ok || !response3.ok) {
               throw new Error("Failed to fetch data for comparison");
             }
 
             const data1 = await response1.json();
             const data2 = (await response2.json()).result;
+            const data3 = await response3.json();
 
             // Always update tables with current data
             document.getElementById("tableContainer1").innerHTML = createTable(
@@ -934,41 +961,52 @@
               data2,
               "/simplequery",
             );
+            document.getElementById("tableContainer3").innerHTML = createTable(
+              data3,
+              "/oldwatchquery",
+            );
 
             updateLastUpdate();
 
             // Update metrics after fetching data in the loop
             await updateMetrics();
 
-            // Compare the data
-            let comparison = compareData(data1, data2);
+            // Compare Gravel vs MongoDB
+            let comparison1 = compareData(data1, data2);
+            renderDiffSummary(comparison1, "diffSummary");
 
-            if (comparison.differences.length > 0) {
-              console.log(comparison);
-              renderDiffSummary(comparison);
-              // Data is not identical anymore, stop the loop
+            // Compare oldWatchQuery vs MongoDB (this is what we're testing)
+            let comparison2 = compareData(data3, data2);
+            renderDiffSummary(comparison2, "diffSummary2");
+
+            if (
+              comparison2.differences.length > 0 ||
+              comparison1.differences.length > 0
+            ) {
+              console.log("OldWatchQuery differences detected:", comparison2);
+              // Data differs but DON'T stop the loop - continue making updates
               document.getElementById("status").className = "status connected";
               document.getElementById(
                 "status",
-              ).textContent = `Data differs after ${updateCount} update(s)! ✅`;
+              ).textContent = `OldWatchQuery differs (update #${updateCount}) - continuing updates...`;
 
-              // Display the update notification with diff details
+              // Display notification but continue loop
               const notificationEl =
                 document.getElementById("updateNotification");
 
               let diffList = "";
-              comparison.differences.slice(0, 5).forEach((diff) => {
+              comparison2.differences.slice(0, 5).forEach((diff) => {
                 diffList += `<li>${escapeHtml(diff)}</li>`;
               });
-              if (comparison.differences.length > 5) {
+              if (comparison2.differences.length > 5) {
                 diffList += `<li><em>... and ${
-                  comparison.differences.length - 5
+                  comparison2.differences.length - 5
                 } more difference(s)</em></li>`;
               }
 
               notificationEl.innerHTML = `
-                <div class="update-notification">
-                  <h4>✅ Random Operations Complete (${updateCount} operation batch(es))</h4>
+                <div class="update-notification" style="background-color: #fff3cd; border-color: #ffc107;">
+                  <h4>⚠️ OldWatchQuery Difference Detected (Update #${updateCount})</h4>
                   <p><strong>Operations Performed:</strong></p>
                   <ul>
                     <li><strong>Updates:</strong> ${escapeHtml(
@@ -981,37 +1019,19 @@
                       String(lastUpdate.operations?.inserts || 0),
                     )}</li>
                   </ul>
-                  <p style="margin-top: 10px;"><strong>Document Count:</strong></p>
-                  <ul>
-                    <li><strong>Before:</strong> ${escapeHtml(
-                      String(lastUpdate.documentCount?.before || "N/A"),
-                    )}</li>
-                    <li><strong>After:</strong> ${escapeHtml(
-                      String(lastUpdate.documentCount?.after || "N/A"),
-                    )}</li>
-                    <li><strong>Target:</strong> ${escapeHtml(
-                      String(lastUpdate.documentCount?.target || "N/A"),
-                    )}</li>
-                    <li><strong>Delta from Target:</strong> ${escapeHtml(
-                      String(lastUpdate.documentCount?.delta || "N/A"),
-                    )}</li>
-                  </ul>
-                  <p style="margin-top: 10px;"><strong>Found ${
-                    comparison.differences.length
+                  <p style="margin-top: 10px;"><strong>OldWatchQuery found ${
+                    comparison2.differences.length
                   } difference(s):</strong></p>
                   <ul style="margin: 5px 0 0 0; padding-left: 20px;">
                     ${diffList}
                   </ul>
+                  <p style="margin-top: 10px;"><em>Continuing random updates...</em></p>
                 </div>
               `;
-
-              // Final refetch to update the display
-              await fetchData();
-              break;
             } else {
               // Data is still identical, continue loop
               console.log(
-                `Update #${updateCount}: Data still identical, trying again...`,
+                `Update #${updateCount}: OldWatchQuery data still identical, trying again...`,
               );
             }
           }

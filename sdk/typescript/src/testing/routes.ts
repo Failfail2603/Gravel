@@ -36,6 +36,7 @@ import {
 } from "./metrics.js";
 import { getMongoClient } from "./mongoClient.js";
 import { regenerateDatabase } from "./regenerateDatabase.js";
+import { oldWatchQueryData } from "./server.js";
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -83,6 +84,10 @@ router.get("/simplequery", async (req: Request, res: Response) => {
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
+});
+
+router.get("/oldwatchquery", (req: Request, res: Response) => {
+  res.json(oldWatchQueryData);
 });
 
 router.get("/metrics", (req: Request, res: Response) => {

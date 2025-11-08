@@ -1,9 +1,13 @@
 import express from "express";
 import { options, PORT, query } from "./config.js";
 import { restartWatchQuery, stopWatchQuery } from "./gravelClient.js";
+import { addOldWatchQueryUpdates } from "./metrics.js";
 import { closeMongoClient, getMongoClient } from "./mongoClient.js";
 import { stopOldWatchQuery, watchQuery } from "./oldWatchQuery.js";
 import { router } from "./routes.js";
+
+// Store oldWatchQuery data similar to how Gravel stores currentData
+export let oldWatchQueryData: any[] = [];
 
 const app = express();
 
@@ -27,7 +31,10 @@ async function startTest() {
 
   await restartWatchQuery();
 
-  watchQuery("users", query, options).subscribe((data) => {});
+  watchQuery("users", query, options).subscribe((data) => {
+    oldWatchQueryData = data;
+    addOldWatchQueryUpdates(1, JSON.stringify(data).length);
+  });
 
   // Handle Ctrl+C gracefully
   process.on("SIGINT", async () => {

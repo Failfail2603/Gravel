@@ -6,9 +6,9 @@ export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
 export const collectionSize = 500000;
 
-export const overrideUpdateNumber: number | null = 10;
-export const overrideDeleteNumber: number | null = 0;
-export const overrideInsertNumber: number | null = 0;
+export const overrideUpdateNumber: number | null = null;
+export const overrideDeleteNumber: number | null = null;
+export const overrideInsertNumber: number | null = null;
 
 export interface GravelTestData {
   _id: ObjectId;
@@ -34,18 +34,7 @@ export interface GravelTestData {
 }
 
 export const query: any = {
-  $and: [
-    {
-      debitor: {
-        $gt: 200000,
-      },
-    },
-    {
-      debitor: {
-        $lt: 800000,
-      },
-    },
-  ],
+  roles: { $elemMatch: { role: "user" } },
 };
 
 export const options: GravelMongoWatchQueryFindOptions = {
@@ -53,21 +42,15 @@ export const options: GravelMongoWatchQueryFindOptions = {
     debitor: 1,
     _id: -1,
   },
-  skip: 0,
-  limit: 20,
+  skip: 50000,
+  limit: 1000,
   projection: {
     _id: 1,
     email: 1,
     roles: { role: 1, contexts: 1 },
     address: { street: 1 },
     debitor: 1,
+    birthday: 1,
     tags: 1,
-    sepa: {
-      name: 1,
-      startDate: 1,
-      endDate: 1,
-      price: 1,
-      bankAccount: { iban: 1, bic: 1, openedAt: 1, active: 1 },
-    },
   },
 };
