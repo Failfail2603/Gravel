@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gravel/db/mongo"
 	"gravel/types"
+	"sync"
 )
 
 const (
@@ -42,6 +43,9 @@ type DBService struct {
 	 * The currently open WatchQueries on the database client
 	 */
 	WatchQueries map[string]*WatchQuery
+	
+	// Mutex to protect concurrent access to WatchQueries map
+	WatchQueriesMutex sync.RWMutex
 }
 
 func newDBService(service DBProvider) (*DBService, error) {

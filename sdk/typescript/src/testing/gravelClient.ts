@@ -12,6 +12,10 @@ export let currentData: { result: any[] } = { result: [] };
 let stopWatchQueryHandle: (() => Promise<void>) | null = null;
 let lastUpdateTimestamp: number | null = null;
 
+export function resetLastUpdateTimestamp() {
+  lastUpdateTimestamp = null;
+}
+
 async function initializeGravel() {
   if (!gravel) {
     try {
@@ -104,7 +108,7 @@ export function hasSettled(): boolean {
     return false;
   }
   const timeSinceLastUpdate = Date.now() - lastUpdateTimestamp;
-  return timeSinceLastUpdate >= 5000;
+  return timeSinceLastUpdate >= 2000;
 }
 
 /**

@@ -8,7 +8,7 @@ export const collectionSize = 500000;
 
 export const overrideUpdateNumber: number | null = 0;
 export const overrideDeleteNumber: number | null = 0;
-export const overrideInsertNumber: number | null = 10;
+export const overrideInsertNumber: number | null = 20;
 
 export interface GravelTestData {
   _id: ObjectId;

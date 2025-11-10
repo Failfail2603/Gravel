@@ -3,6 +3,7 @@ package db
 import (
 	"gravel/json_patch"
 	"gravel/types"
+	"log"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +26,9 @@ type WatchQuery struct {
 
 	// currently watched documents
 	WatchedDocuments []types.WatchedDocument
+
+	// each watchquery has its own channel to receive updates from the dispatcher
+	UpdateChannel chan types.DBChangeStreamEvent
 }
 
 func (w *WatchQuery) IsInfiniteWindow() bool {
@@ -109,16 +113,21 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 			// Extract document from patch value
 			if doc, ok := patch.Value.(types.Document); ok {
 				w.SaveAddDocumentToWindow(dbService, doc, index)
+				log.Printf("Added document to internal watchquery")
+			} else {
+				log.Printf("Wanted to add to internal but value was not a document: %v", patch.Value)
 			}
 		case "remove":
 			// Extract index from path
 			index := parseIndexFromPath(patch.Path)
 			w.SaveRemoveDocumentFromWindow(index)
+			log.Printf("Removed document from internal watchquery")
 		case "move":
 			// Extract old index from "from" and new index from "path"
 			oldIndex := parseIndexFromPath(patch.From)
 			newIndex := parseIndexFromPath(patch.Path)
 			w.SaveMoveDocumentInWindow(oldIndex, newIndex)
+			log.Printf("Moved document in internal watchquery")
 		case "replace":
 			// Check if this is a replace on a sorted field
 			index, field := parseIndexAndFieldFromPath(patch.Path)

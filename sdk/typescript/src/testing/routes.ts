@@ -23,6 +23,7 @@ import {
 } from "./dataGenerators.js";
 import {
   currentData,
+  resetLastUpdateTimestamp,
   restartWatchQuery,
   stopWatchQuery,
   waitForSettled,
@@ -238,6 +239,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
 
     // Return the operation information
     makingUpdates = false;
+    resetLastUpdateTimestamp();
     res.json({
       success: true,
       operations: {

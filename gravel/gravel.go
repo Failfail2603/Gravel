@@ -180,11 +180,15 @@ func (gravel *GravelServer) StartListening() {
 
 		// check if the watchquery already exists with the hash. Different clients can have the same watchquery.
 		// we need to ensure that all unique clients in the
+		dbService.WatchQueriesMutex.RLock()
 		watchQuery := dbService.WatchQueries[req.Hash]
+		dbService.WatchQueriesMutex.RUnlock()
 
 		// if yes we just count up the connections count. We do not need to do anything else as gravel already sends updates down the channel
 		if watchQuery != nil {
+			dbService.WatchQueriesMutex.Lock()
 			watchQuery.NumberOfConnections++
+			dbService.WatchQueriesMutex.Unlock()
 			response := types.DebugMessage{
 				ClientID: req.ClientID,
 				Message:  "Matching watchquery found for Query with Hash " + req.Hash + ". Increased connection count to " + fmt.Sprint(watchQuery.NumberOfConnections),
@@ -199,7 +203,9 @@ func (gravel *GravelServer) StartListening() {
 		}
 
 		// if the watchqueries are empty we need to start the change stream
+		dbService.WatchQueriesMutex.RLock()
 		var shouldStartChangeStream bool = len(dbService.WatchQueries) == 0
+		dbService.WatchQueriesMutex.RUnlock()
 
 		queryInformation, err := dbService.Connection.GetQueryAnalysis(req, queryResult)
 
@@ -244,29 +250,62 @@ func (gravel *GravelServer) StartListening() {
 		}
 
 		newWatchQuery.WatchedDocuments = watchedDocuments
+		// Create a buffered channel for this watchquery to receive updates
+		newWatchQuery.UpdateChannel = make(chan types.DBChangeStreamEvent, 100)
+		dbService.WatchQueriesMutex.Lock()
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
+		dbService.WatchQueriesMutex.Unlock()
 
 		if shouldStartChangeStream {
 			dbService.UpdateChannel = make(chan types.DBChangeStreamEvent)
 			go dbService.Connection.StartChangeStream(dbService.UpdateChannel)
+
+			// Start dispatcher goroutine that broadcasts updates to all watchqueries
+			go func() {
+				for update := range dbService.UpdateChannel {
+					// Broadcast to all watchquery channels
+					dbService.WatchQueriesMutex.RLock()
+					for _, wq := range dbService.WatchQueries {
+						select {
+						case wq.UpdateChannel <- update:
+							// Successfully sent
+						default:
+							// Channel full, skip this watchquery (non-blocking)
+							log.Printf("Warning: UpdateChannel full for watchquery %s, dropping update", wq.Hash)
+						}
+					}
+					dbService.WatchQueriesMutex.RUnlock()
+				}
+				// Close all watchquery channels when dispatcher stops
+				dbService.WatchQueriesMutex.RLock()
+				for _, wq := range dbService.WatchQueries {
+					close(wq.UpdateChannel)
+				}
+				dbService.WatchQueriesMutex.RUnlock()
+			}()
 		}
 
 		go func() {
-			for update := range dbService.UpdateChannel {
+			for update := range newWatchQuery.UpdateChannel {
+				dbService.WatchQueriesMutex.RLock()
+				watchQuery := dbService.WatchQueries[req.Hash]
 
 				start := time.Now()
 				log.Println("Calculated Update for", update.ID)
 				log.Println("Update timestamp:", update.Timestamp.Unix())
 
 				// Calculate patches with snapshot isolation
-				patches := relevant_changes.GetPatchesForChange(dbService, &newWatchQuery, &update)
+				patches := relevant_changes.GetPatchesForChange(dbService, watchQuery, &update)
 
 				log.Println("Patches len", len(patches))
 				end := time.Now()
 				log.Println("Calculated Update took ", end.Sub(start).String())
 
+				log.Println("")
+
 				// check if the update is relevant for the watchquery
 				if len(patches) == 0 {
+					dbService.WatchQueriesMutex.RUnlock()
 					continue
 				}
 
@@ -279,6 +318,7 @@ func (gravel *GravelServer) StartListening() {
 
 				responseData, _ := json.Marshal(update)
 				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(responseData))
+				dbService.WatchQueriesMutex.RUnlock()
 			}
 		}()
 
@@ -313,7 +353,10 @@ func (gravel *GravelServer) StartListening() {
 		}
 
 		// check if the watchquery exists
-		watchQuery := gravel.dbServices[req.ClientID].WatchQueries[req.Hash]
+		dbService := gravel.dbServices[req.ClientID]
+		dbService.WatchQueriesMutex.RLock()
+		watchQuery := dbService.WatchQueries[req.Hash]
+		dbService.WatchQueriesMutex.RUnlock()
 
 		if watchQuery == nil {
 			log.Println("Watchquery not found for client ", req.ClientID, " and hash ", req.Hash)
@@ -328,16 +371,19 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
+		dbService.WatchQueriesMutex.Lock()
 		watchQuery.NumberOfConnections--
 
 		// if the connection count is 0 we pull the watchqeuery from the map
 		if watchQuery.NumberOfConnections == 0 {
-			delete(gravel.dbServices[req.ClientID].WatchQueries, req.Hash)
+			dbService.Connection.StopChangeStream()
+
+			// Close the watchquery's update channel
+			close(watchQuery.UpdateChannel)
+			delete(dbService.WatchQueries, req.Hash)
 		}
 
-		if len(gravel.dbServices[req.ClientID].WatchQueries) == 0 {
-			gravel.dbServices[req.ClientID].Connection.StopChangeStream()
-		}
+		dbService.WatchQueriesMutex.Unlock()
 
 		log.Println("Stopped watchquery for client", req.ClientID, "and hash", req.Hash)
 
