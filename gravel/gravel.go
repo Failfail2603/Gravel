@@ -37,7 +37,7 @@ func generateGravelServer(natsConnection *nats_server.NatsConnection) *GravelSer
 	}
 }
 
-func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQueryRequest) (*types.WatchQueryResponse, error) {
+func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQueryRequest) (*types.WatchQueryResponse, []types.Document, error) {
 	// Execute the query using the dbService
 	results := dbService.Connection.Query(req.CollectionName, req.Query, req.Options)
 
@@ -47,7 +47,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQue
 		errorMsg := "Failed to marshal query results for client " + req.ClientID + ": " + err.Error()
 		log.Println(errorMsg)
 		gravel.natsConnection.Publish("gravel.debug", errorMsg)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// if resultdata is "null" (standard for no documents found and json makes a string)
@@ -66,7 +66,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQue
 		errorMsg := "Failed to marshal query results for client " + req.ClientID + ": " + err.Error()
 		log.Println(errorMsg)
 		gravel.natsConnection.Publish("gravel.debug", errorMsg)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Publish the results to the initial data channel
@@ -75,7 +75,7 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQue
 
 	log.Printf("Query results sent to client %s on channel %s with %d bytes", req.ClientID, channelName, len(responseJSON))
 
-	return &response, nil
+	return &response, results, nil
 }
 
 func (gravel *GravelServer) StartListening() {
@@ -165,7 +165,7 @@ func (gravel *GravelServer) StartListening() {
 		}
 
 		// run the initial query which directly pipes to the client
-		queryResult, err := gravel.runQuery(dbService, req)
+		queryResult, documents, err := gravel.runQuery(dbService, req)
 		if err != nil {
 			response := types.DebugMessage{
 				ClientID: req.ClientID,
@@ -231,14 +231,7 @@ func (gravel *GravelServer) StartListening() {
 		// build watched document if the window is not infinite
 		watchedDocuments := []types.WatchedDocument{}
 
-		// parse the result to documents
-		var documents []types.Document
-		if queryResult != nil && queryResult.Result != "" {
-			if err := json.Unmarshal([]byte(queryResult.Result), &documents); err != nil {
-				log.Printf("Failed to unmarshal query results to extract document IDs: %v", err)
-			}
-		}
-
+		// use the raw documents from the query to preserve MongoDB BSON time types
 		for _, document := range documents {
 
 			watchedDocument, err := dbService.Connection.GetWatchedDocumentInfo(document, queryInformation)
