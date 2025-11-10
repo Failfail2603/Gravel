@@ -6,9 +6,9 @@ export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
 export const collectionSize = 500000;
 
-export const overrideUpdateNumber: number | null = null;
-export const overrideDeleteNumber: number | null = null;
-export const overrideInsertNumber: number | null = null;
+export const overrideUpdateNumber: number | null = 0;
+export const overrideDeleteNumber: number | null = 0;
+export const overrideInsertNumber: number | null = 10;
 
 export interface GravelTestData {
   _id: ObjectId;
@@ -35,11 +35,13 @@ export interface GravelTestData {
 
 export const query: any = {
   roles: { $elemMatch: { role: "user" } },
+  debitor: { $gte: 500000 },
 };
 
 export const options: GravelMongoWatchQueryFindOptions = {
   sort: {
     debitor: 1,
+    birthday: -1,
     _id: -1,
   },
   skip: 50000,

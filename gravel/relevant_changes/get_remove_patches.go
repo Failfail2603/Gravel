@@ -49,7 +49,7 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	}
 
 	// the document matched and was not in window so we check if it is really above the window
-	beforePositionRelativeToFirst, err := getPositionOfOldDocumentRelativeTo(dbService, watchQuery, change, 0)
+	beforePositionRelativeToFirst, err := GetPositionOfDocumentRelativeToIndex(dbService, watchQuery, change, 0, Old)
 	if err != nil {
 		log.Printf("Error getting position of old document relative to first: %v", err)
 		return []json_patch.JSONPatch{}

@@ -25,14 +25,15 @@ import {
   currentData,
   restartWatchQuery,
   stopWatchQuery,
+  waitForSettled,
 } from "./gravelClient.js";
 import {
   addDataBaseUpdates,
   databaseUpdates,
-  gravelUpdates,
-  oldWatchQueryUpdates,
   gravelBytes,
+  gravelUpdates,
   oldWatchQueryBytes,
+  oldWatchQueryUpdates,
 } from "./metrics.js";
 import { getMongoClient } from "./mongoClient.js";
 import { regenerateDatabase } from "./regenerateDatabase.js";
@@ -43,6 +44,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const router = express.Router();
+
+export let makingUpdates = false;
 
 // Serve static HTML
 router.get("/", (req: Request, res: Response) => {
@@ -103,6 +106,7 @@ router.get("/metrics", (req: Request, res: Response) => {
 // API endpoint to make random updates, deletions, and insertions to multiple users
 router.post("/randomupdate", async (req: Request, res: Response) => {
   try {
+    makingUpdates = true;
     // Get singleton MongoDB client
     const client = await getMongoClient();
 
@@ -114,6 +118,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
 
     if (totalUsers === 0) {
       res.status(404).json({ error: "No users found in database" });
+      makingUpdates = false;
       return;
     }
 
@@ -232,6 +237,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
     );
 
     // Return the operation information
+    makingUpdates = false;
     res.json({
       success: true,
       operations: {
@@ -247,6 +253,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    makingUpdates = false;
     console.error("Random operations error:", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
@@ -262,6 +269,20 @@ router.post("/redodb", async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (error) {
     console.error("Database regeneration error:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+// API endpoint to check if Gravel has settled
+router.get("/settled", async (req: Request, res: Response) => {
+  try {
+    // Wait for Gravel to settle (no updates for 2 seconds)
+    await waitForSettled();
+    res.json({ settled: true });
+  } catch (error) {
+    console.error("Error waiting for settled state:", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Unknown error",
     });
