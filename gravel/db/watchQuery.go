@@ -137,6 +137,7 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 				}
 			}
 
+			// this case only happens if the sorted field changed but it did not change the sorted order.
 			// If it's a sorted field, update the WatchedDocument's sort values
 			if isSortedField && index < len(w.WatchedDocuments) {
 				w.WatchedDocuments[index].SortValues[sortFieldIndex] = patch.Value

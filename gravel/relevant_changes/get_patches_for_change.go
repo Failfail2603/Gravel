@@ -25,16 +25,21 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 	// get individual updates for change after we did basic checks as this can get quite heavy
 	change.Updates = ExtractFieldUpdates(change)
 
+	patches := []json_patch.JSONPatch{}
+
 	switch change.Operation {
 	case "update":
-		return GetUpdatePatches(dbService, watchQuery, change)
+		patches = GetUpdatePatches(dbService, watchQuery, change)
 	case "insert":
-		return GetInsertPatches(dbService, watchQuery, change)
+		patches = GetInsertPatches(dbService, watchQuery, change)
 	case "delete":
-		return GetRemovePatches(dbService, watchQuery, change)
+		patches = GetRemovePatches(dbService, watchQuery, change)
 	case "replace":
 	}
 
-	return []json_patch.JSONPatch{}
+	// update the watchqueries internal document state with the patches
+	watchQuery.SavePatches(dbService, patches)
+
+	return patches
 
 }
