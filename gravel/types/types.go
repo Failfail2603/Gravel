@@ -32,6 +32,16 @@ type DBChangeStreamEvent struct {
 
 	// track what indices got removed so we do not remove them again
 	RemovedIndices []int `json:"-"`
+
+	// ProcessedDocumentIDs tracks document IDs that have been processed at this ClusterTime
+	// This is critical for insertMany where multiple documents share the same ClusterTime
+	// and we need to exclude already-processed documents from subsequent queries
+	ProcessedDocumentIDs []string `json:"-"`
+
+	// BatchShiftOffset tracks cumulative window shifts in the current ClusterTime batch
+	// Used to adjust query indices when multiple shifts occur at the same snapshot point
+	// Positive = shifts up (query at lower indices), Negative = shifts down (query at higher indices)
+	BatchShiftOffset int `json:"-"`
 }
 
 // DatabaseConnectRequest represents a request to connect to a database

@@ -7,6 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type WatchQuery struct {
@@ -29,6 +32,28 @@ type WatchQuery struct {
 
 	// each watchquery has its own channel to receive updates from the dispatcher
 	UpdateChannel chan types.DBChangeStreamEvent
+
+	// Track the last ClusterTime to detect when a new batch starts
+	// When a new ClusterTime arrives, we reset ProcessedDocumentIDsInBatch
+	LastClusterTime *primitive.Timestamp
+
+	// ProcessedDocumentIDsInBatch tracks document IDs processed in the current ClusterTime batch
+	// This is critical for insertMany where multiple documents share the same ClusterTime
+	// and we need to handle each insert sequentially (e.g., multiple window shifts)
+	ProcessedDocumentIDsInBatch []string
+
+	// ShiftsInBatch tracks cumulative window shifts (up or down) in the current ClusterTime batch
+	// Used to adjust query indices when multiple shifts occur at the same snapshot point
+	// Positive = shifts up, Negative = shifts down
+	ShiftsInBatch int
+
+	// Mutex to protect concurrent access to this watchquery during update processing and shutdown
+	// This prevents race conditions when the watchquery is being stopped while an update is being processed
+	Mutex sync.RWMutex
+
+	// Stopped flag to signal graceful shutdown
+	// When true, update processing should stop immediately
+	Stopped bool
 }
 
 func (w *WatchQuery) IsInfiniteWindow() bool {

@@ -9,9 +9,19 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func GetSimpleAddPatch(documentIndex int, document types.Document) json_patch.JSONPatch {
+func GetSimpleAddPatch(documentIndex int, document types.Document, shiftWindow ...bool) json_patch.JSONPatch {
+	if len(shiftWindow) > 0 && shiftWindow[0] {
+		return json_patch.JSONPatch{
+			Op:    "add",
+			Type:  "shift",
+			Path:  json_patch.GetBasePatchPath(documentIndex),
+			Value: document,
+		}
+	}
+
 	return json_patch.JSONPatch{
 		Op:    "add",
+		Type:  "simple",
 		Path:  json_patch.GetBasePatchPath(documentIndex),
 		Value: document,
 	}

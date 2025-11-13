@@ -61,9 +61,18 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 	}
 
 	// get single document from the cursor in which the window is shifting
-	index := watchQuery.QueryInformation.WindowStart
+	baseIndex := watchQuery.QueryInformation.WindowStart
 	if dir == ShiftDown {
-		index = watchQuery.QueryInformation.WindowEnd - 1
+		baseIndex = watchQuery.QueryInformation.WindowEnd - 1
+	}
+
+	// Adjust index based on cumulative shifts in this ClusterTime batch
+	// Shift up (positive offset): query progressively higher indices to get missed spots
+	// Shift down (negative offset): query progressively lower indices to get missed spots
+	index := baseIndex + change.BatchShiftOffset
+	if change.BatchShiftOffset != 0 {
+		log.Printf("Window shift: Adjusted query index from %d to %d (batch offset: %d)",
+			baseIndex, index, change.BatchShiftOffset)
 	}
 
 	// query the new document using session context from change event
@@ -88,8 +97,13 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 		addIndex = -1
 	}
 
+	if dir == ShiftUp && change.BatchShiftOffset != 0 {
+		// add the offset to the insertion index to get the correct position as we queried lower indices
+		addIndex += change.BatchShiftOffset
+	}
+
 	// make a patch to add the document to the window in the start of the shift direction
-	addPatch := GetSimpleAddPatch(addIndex, newDocument[0])
+	addPatch := GetSimpleAddPatch(addIndex, newDocument[0], true)
 	patches = append(patches, addPatch)
 
 	return patches
