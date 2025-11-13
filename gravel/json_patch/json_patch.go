@@ -7,10 +7,10 @@ import (
 
 type JSONPatch struct {
 	Op    string      `json:"op"`
-	Type  string      `json:"type"`
+	Type  string      `json:"type,omitempty"`
 	From  string      `json:"from,omitempty"`
 	Path  string      `json:"path"`
-	Value interface{} `json:"value,omitempty"`
+	Value interface{} `json:"value"`
 }
 
 func (p *JSONPatch) ToString() string {

@@ -12,6 +12,21 @@ import (
 )
 
 func getSimpleUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, update *types.FieldUpdate, documentIndex int) json_patch.JSONPatch {
+	// as the path is dot separated we need to replace the dots with slashes
+	path := update.Field
+	for strings.Contains(path, ".") {
+		path = strings.Replace(path, ".", "/", -1)
+	}
+
+	// Handle unset operations - create a remove patch
+	if update.Operation == "unset" {
+		return json_patch.JSONPatch{
+			Op:   "remove",
+			Path: json_patch.GetBasePatchPath(documentIndex) + "/" + path,
+		}
+	}
+
+	// Handle set operations - create a replace patch
 	// as a value can be a nested object we need to project it according to the projection in the watchquery
 	// check if the update value is an objects versus a primitive value
 	value := update.Value
@@ -34,12 +49,6 @@ func getSimpleUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, up
 		value = projectedArray
 	} else {
 		log.Println("found primitive in patched value")
-	}
-
-	// as the path is dot separated we need to replace the dots with slashes
-	path := update.Field
-	for strings.Contains(path, ".") {
-		path = strings.Replace(path, ".", "/", -1)
 	}
 
 	return json_patch.JSONPatch{

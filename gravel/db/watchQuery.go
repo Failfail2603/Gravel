@@ -134,7 +134,7 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 		switch patch.Op {
 		case "add":
 			// Extract index from path (e.g., "/result/0" -> 0, "/result/-" -> -1)
-			index := parseIndexFromPath(patch.Path)
+			index, _ := parseIndexFromPath(patch.Path)
 			// Extract document from patch value
 			if doc, ok := patch.Value.(types.Document); ok {
 				w.SaveAddDocumentToWindow(dbService, doc, index)
@@ -144,13 +144,17 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 			}
 		case "remove":
 			// Extract index from path
-			index := parseIndexFromPath(patch.Path)
-			w.SaveRemoveDocumentFromWindow(index)
-			log.Printf("Removed document from internal watchquery")
+			index, pathFurtherExtended := parseIndexFromPath(patch.Path)
+
+			// only remove if the remove is set on an index. aka there is nothing behind the index
+			if !pathFurtherExtended {
+				w.SaveRemoveDocumentFromWindow(index)
+				log.Printf("Removed document from internal watchquery")
+			}
 		case "move":
 			// Extract old index from "from" and new index from "path"
-			oldIndex := parseIndexFromPath(patch.From)
-			newIndex := parseIndexFromPath(patch.Path)
+			oldIndex, _ := parseIndexFromPath(patch.From)
+			newIndex, _ := parseIndexFromPath(patch.Path)
 			w.SaveMoveDocumentInWindow(oldIndex, newIndex)
 			log.Printf("Moved document in internal watchquery")
 		case "replace":
@@ -182,22 +186,26 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 
 // parseIndexFromPath extracts the index from a JSON patch path
 // e.g., "/result/0" -> 0, "/result/-" -> -1
-func parseIndexFromPath(path string) int {
+func parseIndexFromPath(path string) (int, bool) {
 	parts := strings.Split(path, "/")
+
+	// if length is bigger than 3 we have an additional path behind the index
+	pathFurtherExtended := len(parts) > 3
+
 	if len(parts) < 3 {
-		return -1
+		return -1, false
 	}
 
 	if parts[2] == "-" {
-		return -1
+		return -1, pathFurtherExtended
 	}
 
 	index, err := strconv.Atoi(parts[2])
 	if err != nil {
-		return -1
+		return -1, pathFurtherExtended
 	}
 
-	return index
+	return index, pathFurtherExtended
 }
 
 // parseIndexAndFieldFromPath extracts both the index and field from a JSON patch path
