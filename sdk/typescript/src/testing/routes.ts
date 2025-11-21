@@ -4,9 +4,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 import {
   collectionSize,
+  customBulkOperationGenerator,
   options,
   overrideDeleteNumber,
   overrideInsertNumber,
+  overrideReplaceNumber,
   overrideUpdateNumber,
   query,
   type GravelTestData,
@@ -137,6 +139,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
     let numDeletes = Math.floor(Math.random() * maxOpsPerType) + 1;
     let numInserts = Math.floor(Math.random() * maxOpsPerType) + 1;
     const numUpdates = Math.floor(Math.random() * maxOpsPerType) + 1;
+    const numReplaces = Math.floor(Math.random() * maxOpsPerType) + 1;
 
     // Adjust deletions and insertions to maintain size near target
     if (sizeDelta > 0) {
@@ -158,71 +161,120 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
     // Ensure we don't delete all documents
     numDeletes = Math.min(numDeletes, Math.floor(totalUsers * 0.05));
 
-    const bulkOps: any[] = [];
-    const operationStats = {
+    let bulkOps: any[] = [];
+    let operationStats = {
       updates: 0,
       deletes: 0,
       inserts: 0,
+      replaces: 0,
     };
 
-    // 1. UPDATES - Get random users to update
-    const usersToUpdate = await collection
-      .aggregate([{ $sample: { size: overrideUpdateNumber ?? numUpdates } }])
-      .toArray();
+    // Check if custom bulk operation generator is defined
+    if (customBulkOperationGenerator) {
+      const customResult = await customBulkOperationGenerator(
+        collection,
+        totalUsers,
+      );
+      bulkOps = customResult.bulkOps;
+      operationStats = customResult.stats;
+    } else {
+      // Default random operations
+      // 1. UPDATES - Get random users to update
+      const usersToUpdate = await collection
+        .aggregate([{ $sample: { size: overrideUpdateNumber ?? numUpdates } }])
+        .toArray();
 
-    for (const user of usersToUpdate) {
-      const updateFields = generateRandomUpdateFields();
-      bulkOps.push({
-        updateOne: {
-          filter: { _id: user._id },
-          update: { $set: updateFields },
-        },
-      });
-      operationStats.updates++;
-    }
-
-    // 2. DELETIONS - Get random users to delete
-    const usersToDelete = await collection
-      .aggregate([{ $sample: { size: overrideDeleteNumber ?? numDeletes } }])
-      .toArray();
-
-    for (const user of usersToDelete) {
-      bulkOps.push({
-        deleteOne: {
-          filter: { _id: user._id },
-        },
-      });
-      operationStats.deletes++;
-    }
-
-    // 3. INSERTIONS - Create new documents
-    for (let i = 0; i < (overrideInsertNumber ?? numInserts); i++) {
-      const newDocument: GravelTestData = {
-        _id: new ObjectId(),
-        email: generateRandomEmail(),
-        roles: generateRandomRoles(),
-        address: generateRandomAddress(),
-        debitor: generateRandomDebitor(),
-        tags: generateRandomTags(),
-        sepa: generateRandomSepa(),
-      };
-
-      // Optional fields - 50% chance for archived
-      if (Math.random() > 0.5) {
-        newDocument.archived = Math.random() > 0.5;
+      for (const user of usersToUpdate) {
+        const updateFields = generateRandomUpdateFields();
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: user._id },
+            update: { $set: updateFields },
+          },
+        });
+        operationStats.updates++;
       }
 
-      // Optional fields - 70% chance for birthday
-      if (Math.random() > 0.3) {
-        newDocument.birthday = generateRandomBirthday();
+      // 2. REPLACES - Get random users to replace with completely new data
+      const usersToReplace = await collection
+        .aggregate([
+          { $sample: { size: overrideReplaceNumber ?? numReplaces } },
+        ])
+        .toArray();
+
+      for (const user of usersToReplace) {
+        const replacementDocument: GravelTestData = {
+          _id: user._id, // Keep the same _id
+          email: generateRandomEmail(),
+          roles: generateRandomRoles(),
+          address: generateRandomAddress(),
+          debitor: generateRandomDebitor(),
+          tags: generateRandomTags(),
+          sepa: generateRandomSepa(),
+        };
+
+        // Optional fields - 50% chance for archived
+        if (Math.random() > 0.5) {
+          replacementDocument.archived = Math.random() > 0.5;
+        }
+
+        // Optional fields - 70% chance for birthday
+        if (Math.random() > 0.3) {
+          replacementDocument.birthday = generateRandomBirthday();
+        }
+
+        bulkOps.push({
+          replaceOne: {
+            filter: { _id: user._id },
+            replacement: replacementDocument,
+          },
+        });
+        operationStats.replaces++;
       }
 
-      bulkOps.push({
-        insertOne: {
-          document: newDocument,
-        },
-      });
-      operationStats.inserts++;
+      // 3. DELETIONS - Get random users to delete
+      const usersToDelete = await collection
+        .aggregate([{ $sample: { size: overrideDeleteNumber ?? numDeletes } }])
+        .toArray();
+
+      for (const user of usersToDelete) {
+        bulkOps.push({
+          deleteOne: {
+            filter: { _id: user._id },
+          },
+        });
+        operationStats.deletes++;
+      }
+
+      // 4. INSERTIONS - Create new documents
+      for (let i = 0; i < (overrideInsertNumber ?? numInserts); i++) {
+        const newDocument: GravelTestData = {
+          _id: new ObjectId(),
+          email: generateRandomEmail(),
+          roles: generateRandomRoles(),
+          address: generateRandomAddress(),
+          debitor: generateRandomDebitor(),
+          tags: generateRandomTags(),
+          sepa: generateRandomSepa(),
+        };
+
+        // Optional fields - 50% chance for archived
+        if (Math.random() > 0.5) {
+          newDocument.archived = Math.random() > 0.5;
+        }
+
+        // Optional fields - 70% chance for birthday
+        if (Math.random() > 0.3) {
+          newDocument.birthday = generateRandomBirthday();
+        }
+
+        bulkOps.push({
+          insertOne: {
+            document: newDocument,
+          },
+        });
+        operationStats.inserts++;
+      }
     }
 
     // Execute bulk write operations
@@ -243,9 +295,16 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
     res.json({
       success: true,
       operations: {
-        updates: bulkResult.modifiedCount || 0,
-        deletes: bulkResult.deletedCount || 0,
-        inserts: bulkResult.insertedCount || 0,
+        updates: operationStats.updates,
+        deletes: operationStats.deletes,
+        inserts: operationStats.inserts,
+        replaces: operationStats.replaces,
+      },
+      bulkResult: {
+        matched: bulkResult.matchedCount || 0,
+        modified: bulkResult.modifiedCount || 0,
+        deleted: bulkResult.deletedCount || 0,
+        inserted: bulkResult.insertedCount || 0,
       },
       documentCount: {
         before: totalUsers,

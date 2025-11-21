@@ -155,8 +155,6 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 // QueryWithEvent runs a query with optional snapshot read concern at a specific cluster time
 // If event.ClusterTime is provided, the query will use snapshot read concern at that specific point in time
 func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChangeStreamEvent, collection string, query string, findOptionsStr string) []types.Document {
-	startTime := time.Now()
-	log.Printf("[PROFILE] Query started for collection: %s", collection)
 
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot execute query")
@@ -170,10 +168,9 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 
 	// Get the collection
 	coll := m.client.Database(m.DatabaseName).Collection(collection)
-	log.Printf("[PROFILE] Collection retrieved in %v", time.Since(startTime))
 
 	// Parse query string to bson.M
-	parseStart := time.Now()
+
 	var filter bson.M
 	if query == "" {
 		filter = bson.M{}
@@ -183,19 +180,15 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 			return nil
 		}
 	}
-	log.Printf("[PROFILE] Query parsing took %v", time.Since(parseStart))
 
-	optionsStart := time.Now()
 	findOptions, err := parseFindOptionsString(findOptionsStr)
 	if err != nil {
 		log.Printf("Failed to parse query string: %v", err)
 		return nil
 	}
 
-	log.Printf("[PROFILE] FindOptions parsing took %v", time.Since(optionsStart))
-
 	// Execute the query
-	queryStart := time.Now()
+
 	var cursor *mongo.Cursor
 
 	// If ClusterTime is provided, use RunCommand with custom read concern including atClusterTime
@@ -243,8 +236,7 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 						results = append(results, types.Document(docMap))
 					}
 				}
-				log.Printf("[PROFILE] Query execution with snapshot took %v", time.Since(queryStart))
-				log.Printf("[PROFILE] Decoded %d documents", len(results))
+
 				return results
 			}
 		}
@@ -259,10 +251,8 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 		return nil
 	}
 	defer cursor.Close(ctx)
-	log.Printf("[PROFILE] Query execution took %v", time.Since(queryStart))
 
 	// Collect results
-	decodeStart := time.Now()
 	var results []types.Document
 	docCount := 0
 	for cursor.Next(ctx) {
@@ -279,8 +269,7 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 		log.Printf("Cursor error: %v", err)
 		return nil
 	}
-	log.Printf("[PROFILE] Decoded %d documents in %v", docCount, time.Since(decodeStart))
-	log.Printf("[PROFILE] Total query time: %v", time.Since(startTime))
+
 	return results
 }
 
@@ -609,9 +598,6 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 			Order: -1,
 		})
 	}
-
-	// debug print
-	log.Printf("SortFields: %+v\n", queryInformation.SortFields)
 
 	// ======== analyze window ========
 	skip := int64(0)

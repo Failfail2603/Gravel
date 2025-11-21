@@ -40,7 +40,7 @@ func detectAndResetClusterTimeBatch(watchQuery *db.WatchQuery, update *types.DBC
 		watchQuery.LastClusterTime = update.ClusterTime
 		watchQuery.ProcessedDocumentIDsInBatch = []string{}
 		watchQuery.ShiftsInBatch = 0
-		log.Printf("New ClusterTime batch detected, reset exclusion list and shift counter")
+		log.Printf("Clustertime changed: Restarting Batch")
 	}
 }
 
@@ -117,8 +117,6 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQue
 	// Publish the results to the initial data channel
 	channelName := "gravel.mongo.initial." + req.ClientID
 	gravel.natsConnection.Publish(channelName, string(responseJSON))
-
-	log.Printf("Query results sent to client %s on channel %s with %d bytes", req.ClientID, channelName, len(responseJSON))
 
 	return &response, results, nil
 }
@@ -343,9 +341,8 @@ func (gravel *GravelServer) StartListening() {
 				}
 
 				start := time.Now()
-				log.Println("Calculated Update for", update.ID)
-				log.Println("Update cluster in bits:", update.ClusterTime.I)
-				log.Println("Update cluster time:", update.ClusterTime.T)
+				log.Println("Calculate Update for", update.ID)
+				log.Printf("ClusterTime (time12Bit:inc12Bit): %d:%d", update.ClusterTime.T, update.ClusterTime.I)
 
 				// Handle ClusterTime batching for insertMany operations
 				detectAndResetClusterTimeBatch(&newWatchQuery, &update)
@@ -354,13 +351,13 @@ func (gravel *GravelServer) StartListening() {
 				// Calculate patches with snapshot isolation
 				patches := relevant_changes.GetPatchesForChange(dbService, &newWatchQuery, &update)
 
+				// Update batch tracking state for subsequent events
+				trackWindowShifts(&newWatchQuery, patches)
+
 				log.Println("Patches len", len(patches))
 				end := time.Now()
 				log.Println("Calculated Update took ", end.Sub(start).String())
 				log.Println("")
-
-				// Update batch tracking state for subsequent events
-				trackWindowShifts(&newWatchQuery, patches)
 
 				// check if the update is relevant for the watchquery
 				if len(patches) == 0 {
@@ -415,6 +412,17 @@ func (gravel *GravelServer) StartListening() {
 
 		// check if the watchquery exists
 		dbService := gravel.dbServices[req.ClientID]
+		if dbService == nil {
+			log.Println("DBService not found for client ", req.ClientID, " - service already stopped")
+			response := types.DebugMessage{
+				ClientID: req.ClientID,
+				Status:   "error",
+				Error:    "DBService not found for client " + req.ClientID + " - service already stopped",
+			}
+			responseData, _ := json.Marshal(response)
+			m.Respond(responseData)
+			return
+		}
 		dbService.WatchQueriesMutex.RLock()
 		watchQuery := dbService.WatchQueries[req.Hash]
 		dbService.WatchQueriesMutex.RUnlock()

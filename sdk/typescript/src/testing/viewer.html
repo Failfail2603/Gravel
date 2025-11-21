@@ -1012,6 +1012,9 @@
                     <li><strong>Updates:</strong> ${escapeHtml(
                       String(lastUpdate.operations?.updates || 0),
                     )}</li>
+                    <li><strong>Replaces:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.replaces || 0),
+                    )}</li>
                     <li><strong>Deletions:</strong> ${escapeHtml(
                       String(lastUpdate.operations?.deletes || 0),
                     )}</li>

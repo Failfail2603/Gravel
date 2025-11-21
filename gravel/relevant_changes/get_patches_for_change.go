@@ -35,6 +35,7 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 	case "delete":
 		patches = GetRemovePatches(dbService, watchQuery, change)
 	case "replace":
+		patches = GetReplacePatches(dbService, watchQuery, change)
 	}
 
 	// update the watchqueries internal document state with the patches

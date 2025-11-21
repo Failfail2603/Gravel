@@ -1,8 +1,6 @@
 package mongo
 
 import (
-	"log"
-
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -13,8 +11,6 @@ func flattenObject(object interface{}) []string {
 	}
 
 	var fields []string
-
-	log.Printf("%+q", object)
 
 	switch proj := object.(type) {
 	case map[string]interface{}:
