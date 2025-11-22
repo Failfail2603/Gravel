@@ -22,10 +22,10 @@ export type CustomBulkOperationGenerator = (
   stats: BulkOperationStats;
 }>;
 
-export const overrideUpdateNumber: number | null = 0;
-export const overrideDeleteNumber: number | null = 0;
-export const overrideInsertNumber: number | null = 0;
-export const overrideReplaceNumber: number | null = null;
+export const overrideUpdateNumber: number | null = 5;
+export const overrideDeleteNumber: number | null = 5;
+export const overrideInsertNumber: number | null = 5;
+export const overrideReplaceNumber: number | null = 5;
 
 export interface GravelTestData {
   _id: ObjectId;

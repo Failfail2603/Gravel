@@ -216,6 +216,14 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 			return []json_patch.JSONPatch{}
 		}
 
+		patches := []json_patch.JSONPatch{}
+
+		// remove the last document from the window if the query is limited
+		// early return if it is an exhausted window or no limit was specified
+		if !watchQuery.IsExhaustedWindow() || watchQuery.QueryInformation.WindowLimit != 0 {
+			patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+		}
+
 		// here we now know that the new document should be inside the window so we try to find the correct position
 		// get the new index for the document
 		newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
@@ -223,19 +231,10 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 		// get the document
 		newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart+newIndex)
 
-		patches := []json_patch.JSONPatch{}
 		// add the document at the correct position inside the window
 		patches = append(patches, GetSimpleAddPatch(newIndex, newDocuments[0]))
 
-		// remove the last document from the window if the query is limited
-		// early return if it is an exhausted window or no limit was specified
-		if watchQuery.IsExhaustedWindow() && watchQuery.QueryInformation.WindowLimit == 0 {
-			log.Println("Only Filtered, matched and was not in Window, infinite window")
-			return patches
-		}
-
-		log.Println("Only Filtered, matched and was not in Window, limited window")
-		patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+		log.Println("Only Filtered, matched and was not in Window")
 
 		return patches
 	}
@@ -553,7 +552,9 @@ func optimizePatches(patches []json_patch.JSONPatch) []json_patch.JSONPatch {
 	}
 
 	// Filter out replace operations on removed documents and track seen patches
+	// Separate move operations to apply them at the end
 	optimized := []json_patch.JSONPatch{}
+	movePatches := []json_patch.JSONPatch{}
 	seenPatches := make(map[string]json_patch.JSONPatch) // key format: "op:path" or "op:from:path" for move
 
 	for _, patch := range patches {
@@ -612,10 +613,33 @@ func optimizePatches(patches []json_patch.JSONPatch) []json_patch.JSONPatch {
 			seenPatches[key] = patch
 		}
 
-		optimized = append(optimized, patch)
+		// Separate move operations to apply them at the end
+		// This ensures that replace operations on a document are applied before the document is moved
+		if patch.Op == "move" {
+			movePatches = append(movePatches, patch)
+		} else {
+			optimized = append(optimized, patch)
+		}
 	}
 
+	// Append move operations at the end to ensure they're applied after all other operations
+	optimized = append(optimized, movePatches...)
+
 	return optimized
+}
+
+func filterOutNonProjectedUpdates(patches []json_patch.JSONPatch, isProjectedField bool) []json_patch.JSONPatch {
+	if !isProjectedField {
+		newPatches := []json_patch.JSONPatch{}
+		for _, patch := range patches {
+			if patch.Op == "replace" && patch.Type == "simple" {
+				continue
+			}
+			newPatches = append(newPatches, patch)
+		}
+		return newPatches
+	}
+	return patches
 }
 
 func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent) []json_patch.JSONPatch {
@@ -638,7 +662,11 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 			patches = append(patches, getSimpleUpdatePatch(dbService, watchQuery, &update, documentIndex))
 			log.Printf("Simple update patch for document %v", documentIndex)
 		} else if isFilteredField && !isSortedField {
-			patches = append(patches, getSimpleFilteredUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)...)
+			filteredPatches := getSimpleFilteredUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
+			filteredPatches = filterOutNonProjectedUpdates(filteredPatches, isProjectedField)
+			if len(filteredPatches) > 0 {
+				patches = append(patches, filteredPatches...)
+			}
 		} else if !isFilteredField && isSortedField {
 			// we only look for sorted updates if the old document even matched the query. As a field changed which is not relevant to the query itself we can disregard everything changed if the query did not match
 			matchedBefore, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
@@ -652,26 +680,22 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 				return []json_patch.JSONPatch{}
 			}
 			if matchedBefore && matchedAfter {
-
-				patches = append(patches, getSimpleSortedUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)...)
+				sortedPatches := getSimpleSortedUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
+				sortedPatches = filterOutNonProjectedUpdates(sortedPatches, isProjectedField)
+				patches = append(patches, sortedPatches...)
 			} else {
 				log.Println("Sorted field changed but document changed state so the filter function will handle it")
 			}
 		} else if isFilteredField && isSortedField {
-			patches = append(patches, getFilteredAndSortedUpdatedPatches(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)...)
+			filteredAndSortedPatches := getFilteredAndSortedUpdatedPatches(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
+			filteredAndSortedPatches = filterOutNonProjectedUpdates(filteredAndSortedPatches, isProjectedField)
+			patches = append(patches, filteredAndSortedPatches...)
 		} else {
 			// ignore everything else
 			log.Printf("Ignoring update for field %v. Update is not relevant. Inside window %v", update.Field, updatedDocumentIsInWindow)
 			continue
 		}
 
-		// if an update resulted in an simple replace patch. Gravel wants to simply update a value in the view.
-		// For simplicity, the functions ignore if the update would event be relevant to apply if it not projected.
-		lastPatch := patches[len(patches)-1]
-		if lastPatch.Op == "replace" && lastPatch.Type == "simple" && !isProjectedField {
-			log.Printf("Gravel used fallback to simple update for change but it is not projected so remove it!")
-			patches = patches[:len(patches)-1]
-		}
 	}
 
 	// as there can be a multiple of updates in one change we need to check if one patch makes other patches useless
