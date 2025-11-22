@@ -3,8 +3,24 @@ package relevant_changes
 import (
 	"gravel/db"
 	"gravel/types"
+	"regexp"
 	"strings"
 )
+
+// removeArrayIndices removes numeric array indices from a field path
+// e.g., "roles.0.role" becomes "roles.role"
+// e.g., "users.2.addresses.1.city" becomes "users.addresses.city"
+var arrayIndexRegex = regexp.MustCompile(`\.\d+\.`)
+
+func removeArrayIndices(fieldPath string) string {
+	// Replace all occurrences of .NUMBER. with a single dot
+	normalized := arrayIndexRegex.ReplaceAllString(fieldPath, ".")
+
+	// Handle trailing array index (e.g., "roles.0")
+	normalized = regexp.MustCompile(`\.\d+$`).ReplaceAllString(normalized, "")
+
+	return normalized
+}
 
 // isSingleFieldInRelevantArray checks if a field path matches any of the relevant fields
 // a field patch will be a dot joined path like "user.name"
@@ -12,17 +28,31 @@ import (
 // so "user.name" will match "user.name"
 // the edgecase here is if we have an update on an entire nested object like user.
 // so the fieldPath user should also match "user.name" if "user.name" is in the relevant fields
+// It also handles array indices: "roles.0.role" will match "roles.role"
 func isSingleFieldInRelevantArray(fieldPath string, relevantFields []string) bool {
+	// Normalize the fieldPath by removing array indices
+	normalizedFieldPath := removeArrayIndices(fieldPath)
+
 	for _, relevantField := range relevantFields {
-		// Exact match
+		// Exact match (with normalized field path)
+		if normalizedFieldPath == relevantField {
+			return true
+		}
+
+		// Also check exact match with original path (in case relevantField has indices too)
 		if fieldPath == relevantField {
 			return true
 		}
 
-		// check if the fieldPath is a subpath of the relvant fields
+		// check if the normalizedFieldPath is a subpath of the relevant fields
 		// so "user.address" should match "user.address.city"
 		// we cannot use contain as the path at the start must match exactly
-		if strings.HasPrefix(relevantField, fieldPath) {
+		if strings.HasPrefix(relevantField, normalizedFieldPath+".") {
+			return true
+		}
+
+		// check if the normalizedFieldPath is a parent of the relevant field
+		if strings.HasPrefix(normalizedFieldPath, relevantField+".") {
 			return true
 		}
 	}
