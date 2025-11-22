@@ -53,6 +53,7 @@ func getSimpleUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQuery, up
 
 	return json_patch.JSONPatch{
 		Op:    "replace",
+		Type:  "simple",
 		Path:  json_patch.GetBasePatchPath(documentIndex) + "/" + path,
 		Value: value,
 	}
@@ -662,6 +663,14 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 			// ignore everything else
 			log.Printf("Ignoring update for field %v. Update is not relevant. Inside window %v", update.Field, updatedDocumentIsInWindow)
 			continue
+		}
+
+		// if an update resulted in an simple replace patch. Gravel wants to simply update a value in the view.
+		// For simplicity, the functions ignore if the update would event be relevant to apply if it not projected.
+		lastPatch := patches[len(patches)-1]
+		if lastPatch.Op == "replace" && lastPatch.Type == "simple" && !isProjectedField {
+			log.Printf("Gravel used fallback to simple update for change but it is not projected so remove it!")
+			patches = patches[:len(patches)-1]
 		}
 	}
 
