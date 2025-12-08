@@ -92,7 +92,6 @@ func ExtractFieldUpdates(change *types.DBChangeStreamEvent) []types.FieldUpdate 
 		// For delete, there are no field updates - the entire document is removed
 		// We could potentially add a special update for the entire document deletion
 		// but typically this is handled at the document level, not field level
-		log.Printf("Delete operation detected for document %s - no field updates extracted", change.ID)
 
 	default:
 		log.Printf("Unknown operation type: %s", change.Operation)

@@ -51,6 +51,7 @@ export interface Gravel {
       db: T;
     } & DatabaseOptionsClientMap[T],
   ): Promise<DatabaseClientMap[T]>;
+  close(): Promise<void>;
 }
 
 /**
@@ -68,17 +69,16 @@ const databaseClients: Map<string, GravelClient> = new Map();
  * @returns A Promise that resolves to a NatsConnection
  * @throws Error if connection times out
  */
-async function connectToGravel(timeoutMs: number = 10000): Promise<NatsConnection> {
+async function connectToGravel(
+  timeoutMs: number = 10000,
+): Promise<NatsConnection> {
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       reject(new Error(`Gravel connection timed out after ${timeoutMs}ms`));
     }, timeoutMs);
   });
 
-  const natsConnection = await Promise.race([
-    connect(),
-    timeoutPromise,
-  ]);
+  const natsConnection = await Promise.race([connect(), timeoutPromise]);
 
   return natsConnection;
 }
@@ -151,6 +151,18 @@ export async function getGravelConnection(
 
         resolve(existingClient as DatabaseClientMap[T]);
       });
+    },
+    close: async (): Promise<void> => {
+      // Clear all database clients
+      databaseClients.clear();
+
+      // Drain and close the NATS connection
+      await natsConnection.drain();
+
+      // Clear the gravel instance
+      gravelInstance = null;
+
+      console.log("NATS connection closed");
     },
   };
 

@@ -67,8 +67,8 @@ export interface GravelMongoWatchQueryResponse {
   // the has of the query to identify the inital query on the client and give back the correct result
   queryHash: string;
 
-  // the type of the result. can be "full" or "patch"
-  type: "full" | "patch";
+  // the type of the result. can be "full", "patch", or "noop"
+  type: "full" | "patch" | "noop";
 
   // the result. can be a full document or a json patch depending on the type
   result: string;

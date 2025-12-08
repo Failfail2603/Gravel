@@ -40,7 +40,6 @@ func detectAndResetClusterTimeBatch(watchQuery *db.WatchQuery, update *types.DBC
 		watchQuery.LastClusterTime = update.ClusterTime
 		watchQuery.ProcessedDocumentIDsInBatch = []string{}
 		watchQuery.ShiftsInBatch = 0
-		log.Printf("Clustertime changed: Restarting Batch")
 	}
 }
 
@@ -70,8 +69,7 @@ func trackWindowShifts(watchQuery *db.WatchQuery, patches []json_patch.JSONPatch
 	shiftsInThisEvent := countWindowShifts(patches, watchQuery.ShiftsInBatch)
 	if shiftsInThisEvent != 0 {
 		watchQuery.ShiftsInBatch += shiftsInThisEvent
-		log.Printf("Window shifted %d times in this event, total batch shifts: %d",
-			shiftsInThisEvent, watchQuery.ShiftsInBatch)
+
 	}
 }
 
@@ -294,7 +292,7 @@ func (gravel *GravelServer) StartListening() {
 
 		newWatchQuery.WatchedDocuments = watchedDocuments
 		// Create a buffered channel for this watchquery to receive updates
-		newWatchQuery.UpdateChannel = make(chan types.DBChangeStreamEvent, 100)
+		newWatchQuery.UpdateChannel = make(chan types.DBChangeStreamEvent, 1000)
 		dbService.WatchQueriesMutex.Lock()
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
 		dbService.WatchQueriesMutex.Unlock()
@@ -359,17 +357,21 @@ func (gravel *GravelServer) StartListening() {
 				log.Println("Calculated Update took ", end.Sub(start).String())
 				log.Println("")
 
-				// check if the update is relevant for the watchquery
-				if len(patches) == 0 {
-					newWatchQuery.Mutex.Unlock()
-					continue
-				}
-
 				// send the update to the client
-				updateResponse := types.WatchQueryResponse{
-					QueryHash: req.Hash,
-					Type:      "patch",
-					Result:    json_patch.PatchArrayToString(patches),
+				var updateResponse types.WatchQueryResponse
+				if len(patches) == 0 {
+					// Send noop message to indicate that the update was processed but resulted in no changes
+					updateResponse = types.WatchQueryResponse{
+						QueryHash: req.Hash,
+						Type:      "noop",
+						Result:    "[]",
+					}
+				} else {
+					updateResponse = types.WatchQueryResponse{
+						QueryHash: req.Hash,
+						Type:      "patch",
+						Result:    json_patch.PatchArrayToString(patches),
+					}
 				}
 
 				responseData, _ := json.Marshal(updateResponse)

@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gravel Data Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+        margin-top: 0;
+      }
+      .status {
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        font-size: 14px;
+      }
+      .status.connected {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .status.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+      }
+      th,
+      td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+        white-space: nowrap;
+      }
+      th {
+        background-color: #4caf50;
+        color: white;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      th.index-column,
+      td.index-column {
+        background-color: #e8f5e9;
+        font-weight: 600;
+        text-align: center;
+        width: 50px;
+        min-width: 50px;
+        color: #2e7d32;
+      }
+      th.index-column {
+        background-color: #388e3c;
+        color: white;
+      }
+      tr:hover {
+        background-color: #f5f5f5;
+      }
+      tr:nth-child(even) {
+        background-color: #fafafa;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+      }
+      .empty-state pre {
+        text-align: left;
+        background: #f5f5f5;
+        padding: 15px;
+        border-radius: 4px;
+        overflow: auto;
+        max-height: 400px;
+      }
+      .last-update {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 10px;
+      }
+      .comparison-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 20px;
+      }
+      .data-section {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        overflow-x: auto;
+        min-width: 0;
+      }
+      .data-section h2 {
+        margin-top: 0;
+        font-size: 18px;
+        color: #333;
+      }
+      .diff-highlight {
+        background-color: #fff3cd !important;
+        border-left: 3px solid #ffc107;
+      }
+      .diff-missing {
+        background-color: #f8d7da !important;
+        border-left: 3px solid #dc3545;
+      }
+      .diff-extra {
+        background-color: #d1ecf1 !important;
+        border-left: 3px solid #17a2b8;
+      }
+      .diff-summary {
+        background-color: #fff9e6;
+        border: 1px solid #ffc107;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 20px;
+        font-size: 14px;
+      }
+      .diff-summary strong {
+        color: #856404;
+      }
+      .controls {
+        margin-bottom: 20px;
+      }
+      .btn {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        font-size: 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn:hover {
+        background-color: #45a049;
+      }
+      .btn:active {
+        background-color: #3d8b40;
+      }
+      .btn:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+      }
+      .btn.secondary {
+        background-color: #2196f3;
+      }
+      .btn.secondary:hover {
+        background-color: #0b7dda;
+      }
+      .btn-group {
+        display: flex;
+        gap: 10px;
+      }
+      .btn.warning {
+        background-color: #ff9800;
+      }
+      .btn.warning:hover {
+        background-color: #e68900;
+      }
+      .update-notification {
+        background-color: #d1ecf1;
+        border: 1px solid #17a2b8;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 20px;
+        font-size: 14px;
+        animation: fadeIn 0.3s ease-in;
+      }
+      .update-notification h4 {
+        margin: 0 0 10px 0;
+        color: #0c5460;
+      }
+      .update-notification ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      .update-notification li {
+        margin: 5px 0;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .metrics-section {
+        margin-bottom: 30px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 20px;
+        background: white;
+      }
+      .metrics-section h2 {
+        margin-top: 0;
+        color: #333;
+      }
+      .chart-container {
+        position: relative;
+        height: 300px;
+        margin-top: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🗄️ Gravel Real-Time Data Viewer</h1>
+      <div id="status" class="status connected">Ready to compare endpoints</div>
+
+      <!-- Controls -->
+      <div class="btn-group" style="margin-bottom: 20px">
+        <button class="btn" id="compareBtn" onclick="fetchData()">
+          🔄 Refetch Data
+        </button>
+        <button class="btn warning" onclick="makeRandomUpdate()">
+          🎲 Random Update
+        </button>
+        <button class="btn warning" onclick="makeRandomUpdate(true)">
+          🎲 Random Update Single
+        </button>
+        <button class="btn warning" onclick="regenerateDatabase()">
+          🔄 Regenerate DB (500k)
+        </button>
+      </div>
+
+      <!-- Update Notification -->
+      <div id="updateNotification"></div>
+
+      <!-- Metrics Graph Section -->
+      <div class="metrics-section">
+        <h2>📊 Real-Time Metrics - Updates</h2>
+        <div class="chart-container">
+          <canvas id="metricsChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Bytes Metrics Graph Section -->
+      <div class="metrics-section">
+        <h2>📊 Real-Time Metrics - Bytes</h2>
+        <div class="chart-container">
+          <canvas id="bytesChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Controls Section -->
+      <div class="controls" style="display: none"></div>
+
+      <div class="last-update" id="lastUpdate"></div>
+
+      <h2 style="margin-top: 30px">Data Comparison</h2>
+      <div id="diffSummary"></div>
+      <div id="diffSummary2"></div>
+      <div class="comparison-container">
+        <div class="data-section">
+          <h2>Gravel</h2>
+          <div id="tableContainer1"></div>
+        </div>
+        <div class="data-section">
+          <h2>MongoDB Direct Query</h2>
+          <div id="tableContainer2"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let lastDataHash1 = "";
+      let lastDataHash2 = "";
+      let lastDataHash3 = "";
+      let currentData1 = null;
+      let currentData2 = null;
+      let currentData3 = null;
+
+      // Metrics chart variables
+      let metricsChart = null;
+      let bytesChart = null;
+      const maxDataPoints = 30;
+      const metricsHistory = {
+        timestamps: [],
+        databaseUpdates: [],
+        gravelUpdates: [],
+        oldWatchQueryUpdates: [],
+        gravelBytes: [],
+        oldWatchQueryBytes: [],
+      };
+
+      // Initialize metrics chart
+      function initMetricsChart() {
+        const ctx = document.getElementById("metricsChart").getContext("2d");
+        metricsChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Database Updates",
+                data: [],
+                borderColor: "#4caf50",
+                backgroundColor: "rgba(76, 175, 80, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Gravel Updates",
+                data: [],
+                borderColor: "#2196f3",
+                backgroundColor: "rgba(33, 150, 243, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Old Watch Query Updates",
+                data: [],
+                borderColor: "#ff9800",
+                backgroundColor: "rgba(255, 152, 0, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Time",
+                },
+              },
+              y: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Updates Count",
+                },
+                beginAtZero: true,
+              },
+            },
+            plugins: {
+              legend: {
+                display: true,
+                position: "top",
+              },
+              tooltip: {
+                mode: "index",
+                intersect: false,
+              },
+            },
+            interaction: {
+              mode: "nearest",
+              axis: "x",
+              intersect: false,
+            },
+          },
+        });
+      }
+
+      // Initialize bytes chart
+      function initBytesChart() {
+        const ctx = document.getElementById("bytesChart").getContext("2d");
+        bytesChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Gravel Bytes",
+                data: [],
+                borderColor: "#2196f3",
+                backgroundColor: "rgba(33, 150, 243, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Old Watch Query Bytes",
+                data: [],
+                borderColor: "#ff9800",
+                backgroundColor: "rgba(255, 152, 0, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Time",
+                },
+              },
+              y: {
+                display: true,
+                title: {
+                  display: true,
+                  text: "Bytes",
+                },
+                beginAtZero: true,
+              },
+            },
+            plugins: {
+              legend: {
+                display: true,
+                position: "top",
+              },
+              tooltip: {
+                mode: "index",
+                intersect: false,
+              },
+            },
+            interaction: {
+              mode: "nearest",
+              axis: "x",
+              intersect: false,
+            },
+          },
+        });
+      }
+
+      // Fetch and update metrics
+      async function updateMetrics() {
+        try {
+          const response = await fetch("/metrics");
+          if (!response.ok) {
+            console.error("Failed to fetch metrics:", response.status);
+            return;
+          }
+
+          const metrics = await response.json();
+          const now = new Date();
+          const timeLabel = now.toLocaleTimeString();
+
+          // Add new data point
+          metricsHistory.timestamps.push(timeLabel);
+          metricsHistory.databaseUpdates.push(metrics.databaseUpdates || 0);
+          metricsHistory.gravelUpdates.push(metrics.gravelUpdates || 0);
+          metricsHistory.oldWatchQueryUpdates.push(
+            metrics.oldWatchQueryUpdates || 0,
+          );
+          metricsHistory.gravelBytes.push(metrics.gravelBytes || 0);
+          metricsHistory.oldWatchQueryBytes.push(
+            metrics.oldWatchQueryBytes || 0,
+          );
+
+          // Limit the number of data points
+          if (metricsHistory.timestamps.length > maxDataPoints) {
+            metricsHistory.timestamps.shift();
+            metricsHistory.databaseUpdates.shift();
+            metricsHistory.gravelUpdates.shift();
+            metricsHistory.oldWatchQueryUpdates.shift();
+            metricsHistory.gravelBytes.shift();
+            metricsHistory.oldWatchQueryBytes.shift();
+          }
+
+          // Update updates chart
+          metricsChart.data.labels = metricsHistory.timestamps;
+          metricsChart.data.datasets[0].data = metricsHistory.databaseUpdates;
+          metricsChart.data.datasets[1].data = metricsHistory.gravelUpdates;
+          metricsChart.data.datasets[2].data =
+            metricsHistory.oldWatchQueryUpdates;
+          metricsChart.update("none"); // 'none' mode for better performance
+
+          // Update bytes chart
+          bytesChart.data.labels = metricsHistory.timestamps;
+          bytesChart.data.datasets[0].data = metricsHistory.gravelBytes;
+          bytesChart.data.datasets[1].data = metricsHistory.oldWatchQueryBytes;
+          bytesChart.update("none"); // 'none' mode for better performance
+        } catch (error) {
+          console.error("Error updating metrics:", error);
+        }
+      }
+
+      // Removed automatic polling - metrics now update with fetchData
+
+      function flattenObject(obj, prefix = "") {
+        const flattened = {};
+
+        for (const key in obj) {
+          if (obj.hasOwnProperty(key)) {
+            const value = obj[key];
+            const newKey = prefix ? `${prefix}.${key}` : key;
+
+            if (
+              value !== null &&
+              typeof value === "object" &&
+              !Array.isArray(value)
+            ) {
+              // Recursively flatten nested objects
+              Object.assign(flattened, flattenObject(value, newKey));
+            } else if (Array.isArray(value)) {
+              // Convert arrays to JSON strings
+              flattened[newKey] = JSON.stringify(value);
+            } else {
+              flattened[newKey] = value;
+            }
+          }
+        }
+
+        return flattened;
+      }
+
+      // Deep equality comparison that ignores object key order
+      function deepEqual(obj1, obj2, path = "") {
+        // Handle null/undefined
+        if (obj1 === obj2) return { equal: true };
+        if (obj1 == null || obj2 == null) {
+          return {
+            equal: false,
+            path,
+            reason: `null/undefined mismatch: ${obj1} vs ${obj2}`,
+          };
+        }
+
+        // Handle different types
+        if (typeof obj1 !== typeof obj2) {
+          return {
+            equal: false,
+            path,
+            reason: `Type mismatch: ${typeof obj1} vs ${typeof obj2}`,
+          };
+        }
+
+        // Handle primitives
+        if (typeof obj1 !== "object") {
+          // Special handling for ISO date strings
+          if (typeof obj1 === "string" && typeof obj2 === "string") {
+            const date1 = new Date(obj1);
+            const date2 = new Date(obj2);
+
+            // Check if both are valid dates
+            if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
+              const equal = date1.getTime() === date2.getTime();
+              return {
+                equal,
+                path,
+                reason: equal ? null : `Date mismatch: ${obj1} vs ${obj2}`,
+              };
+            }
+          }
+
+          return {
+            equal: obj1 === obj2,
+            path,
+            reason: obj1 === obj2 ? null : `Value mismatch: ${obj1} vs ${obj2}`,
+          };
+        }
+
+        // Handle arrays
+        if (Array.isArray(obj1) && Array.isArray(obj2)) {
+          if (obj1.length !== obj2.length) {
+            return {
+              equal: false,
+              path,
+              reason: `Array length mismatch: ${obj1.length} vs ${obj2.length}`,
+            };
+          }
+
+          for (let i = 0; i < obj1.length; i++) {
+            const result = deepEqual(
+              obj1[i],
+              obj2[i],
+              path ? `${path}[${i}]` : `[${i}]`,
+            );
+            if (!result.equal) return result;
+          }
+
+          return { equal: true };
+        }
+
+        // Handle objects - compare all keys regardless of order
+        if (Array.isArray(obj1) !== Array.isArray(obj2)) {
+          return {
+            equal: false,
+            path,
+            reason: "One is array, other is object",
+          };
+        }
+
+        const keys1 = Object.keys(obj1);
+        const keys2 = Object.keys(obj2);
+
+        if (keys1.length !== keys2.length) {
+          return {
+            equal: false,
+            path,
+            reason: `Different number of keys: ${keys1.length} vs ${keys2.length}`,
+          };
+        }
+
+        const allKeys = new Set([...keys1, ...keys2]);
+        for (const key of allKeys) {
+          if (!obj1.hasOwnProperty(key) || !obj2.hasOwnProperty(key)) {
+            return {
+              equal: false,
+              path: path ? `${path}.${key}` : key,
+              reason: `Key "${key}" missing in one object`,
+            };
+          }
+
+          const result = deepEqual(
+            obj1[key],
+            obj2[key],
+            path ? `${path}.${key}` : key,
+          );
+          if (!result.equal) return result;
+        }
+
+        return { equal: true };
+      }
+
+      function compareData(data1, data2) {
+        const differences = [];
+
+        if (!data1 || !data2)
+          return { differences, message: "One or both datasets are null" };
+        if (!Array.isArray(data1) || !Array.isArray(data2)) {
+          return {
+            differences,
+            message: "One or both datasets are not arrays",
+          };
+        }
+
+        const len1 = data1.length;
+        const len2 = data2.length;
+
+        if (len1 !== len2) {
+          differences.push(
+            `Different array lengths: /data has ${len1} items, /simplequery has ${len2} items`,
+          );
+        }
+
+        const maxLen = Math.max(len1, len2);
+
+        for (let i = 0; i < maxLen; i++) {
+          const item1 = i < len1 ? data1[i] : null;
+          const item2 = i < len2 ? data2[i] : null;
+
+          if (!item1) {
+            differences.push(
+              `Row ${i}: Missing in /data but exists in /simplequery`,
+            );
+          } else if (!item2) {
+            differences.push(
+              `Row ${i}: Missing in /simplequery but exists in /data`,
+            );
+          } else {
+            const result = deepEqual(item1, item2, `Row ${i}`);
+            if (!result.equal) {
+              differences.push(`${result.path}: ${result.reason}`);
+            }
+          }
+        }
+
+        return {
+          differences,
+          message:
+            differences.length === 0
+              ? "Data is identical! ✅"
+              : `Found ${differences.length} difference(s)`,
+        };
+      }
+
+      function createTable(data, sourceEndpoint) {
+        if (!data) {
+          return '<div class="empty-state">No data received (null or undefined)</div>';
+        }
+
+        if (!Array.isArray(data)) {
+          return `<div class="empty-state">Data is not an array. Type: ${typeof data}<br><pre>${JSON.stringify(
+            data,
+            null,
+            2,
+          )}</pre></div>`;
+        }
+
+        if (data.length === 0) {
+          return '<div class="empty-state">No data available (empty array)</div>';
+        }
+
+        // Flatten all objects
+        const flattenedData = data.map((item) => flattenObject(item));
+
+        // Get all unique keys across all objects
+        const allKeys = new Set();
+        flattenedData.forEach((item) => {
+          Object.keys(item).forEach((key) => allKeys.add(key));
+        });
+
+        const headers = Array.from(allKeys).sort();
+
+        if (headers.length === 0) {
+          return '<div class="empty-state">No fields found in data</div>';
+        }
+
+        // Create table HTML
+        let html = "<table><thead><tr>";
+        html += '<th class="index-column">#</th>';
+        headers.forEach((header) => {
+          html += `<th>${escapeHtml(header)}</th>`;
+        });
+        html += "</tr></thead><tbody>";
+
+        flattenedData.forEach((row, index) => {
+          html += "<tr>";
+          html += `<td class="index-column">${index}</td>`;
+          headers.forEach((header) => {
+            const value = row[header] !== undefined ? row[header] : "";
+            html += `<td>${escapeHtml(String(value))}</td>`;
+          });
+          html += "</tr>";
+        });
+
+        html += "</tbody></table>";
+        return html;
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function updateLastUpdate() {
+        const now = new Date();
+        document.getElementById(
+          "lastUpdate",
+        ).textContent = `Last updated: ${now.toLocaleTimeString()}`;
+      }
+
+      function renderDiffSummary(comparison, summaryElementId = "diffSummary") {
+        const diffSummaryEl = document.getElementById(summaryElementId);
+
+        if (comparison.differences.length === 0) {
+          diffSummaryEl.innerHTML = `<div class="diff-summary" style="background-color: #d4edda; border-color: #28a745;"><strong>✅ ${comparison.message}</strong></div>`;
+        } else {
+          let diffHtml = `<div class="diff-summary"><strong>⚠️ ${comparison.message}:</strong><ul style="margin: 10px 0 0 0; padding-left: 20px;">`;
+          comparison.differences.slice(0, 10).forEach((diff) => {
+            diffHtml += `<li>${escapeHtml(diff)}</li>`;
+          });
+          if (comparison.differences.length > 10) {
+            diffHtml += `<li><em>... and ${
+              comparison.differences.length - 10
+            } more difference(s)</em></li>`;
+          }
+          diffHtml += `</ul></div>`;
+          diffSummaryEl.innerHTML = diffHtml;
+        }
+      }
+
+      async function fetchData() {
+        try {
+          // Fetch from all endpoints
+          const [response1, response2, response3] = await Promise.all([
+            fetch("/data"),
+            fetch("/simplequery"),
+            fetch("/oldwatchquery"),
+          ]);
+
+          if (!response1.ok) {
+            throw new Error(`/data error! status: ${response1.status}`);
+          }
+          if (!response2.ok) {
+            throw new Error(`/simplequery error! status: ${response2.status}`);
+          }
+          if (!response3.ok) {
+            throw new Error(
+              `/oldwatchquery error! status: ${response3.status}`,
+            );
+          }
+
+          const data1 = await response1.json();
+          const data2 = (await response2.json()).result;
+          const data3 = await response3.json();
+
+          // Always update tables with current data
+          document.getElementById("tableContainer1").innerHTML = createTable(
+            data1,
+            "/data",
+          );
+          document.getElementById("tableContainer2").innerHTML = createTable(
+            data2,
+            "/simplequery",
+          );
+          // document.getElementById("tableContainer3").innerHTML = createTable(
+          //   data3,
+          //   "/oldwatchquery",
+          // );
+
+          updateLastUpdate();
+
+          // Compare Gravel vs MongoDB
+          const comparison1 = compareData(data1, data2);
+          console.log("Gravel vs MongoDB comparison:", comparison1);
+          renderDiffSummary(comparison1, "diffSummary");
+
+          // Compare oldWatchQuery vs MongoDB
+          const comparison2 = compareData(data3, data2);
+          console.log("OldWatchQuery vs MongoDB comparison:", comparison2);
+          // renderDiffSummary(comparison2, "diffSummary2");
+
+          // Update metrics after fetching data
+          await updateMetrics();
+
+          // Update status
+          document.getElementById("status").className = "status connected";
+          document.getElementById("status").textContent = "Comparison complete";
+        } catch (error) {
+          console.error("Error fetching data:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error: ${error.message}`;
+        }
+      }
+
+      // Regenerate the database with 500k items
+      async function regenerateDatabase() {
+        const confirmRegen = confirm(
+          "Are you sure you want to regenerate the database with 500,000 items? This will delete all existing data.",
+        );
+
+        if (!confirmRegen) {
+          return;
+        }
+
+        try {
+          document.getElementById("status").className = "status connected";
+          document.getElementById("status").textContent =
+            "Regenerating database with 500,000 items...";
+
+          const startTime = performance.now();
+          const response = await fetch("/redodb", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+          const endTime = performance.now();
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Failed to regenerate database");
+          }
+
+          const result = await response.json();
+          const durationSeconds = ((endTime - startTime) / 1000).toFixed(2);
+
+          document.getElementById("status").className = "status connected";
+          document.getElementById(
+            "status",
+          ).textContent = `Database regenerated successfully in ${durationSeconds}s! Refetching data...`;
+
+          // Show notification
+          const notificationEl = document.getElementById("updateNotification");
+          notificationEl.innerHTML = `
+            <div class="update-notification" style="background-color: #d4edda; border-color: #28a745;">
+              <h4>✅ Database Regeneration Complete</h4>
+              <p><strong>Duration:</strong> ${durationSeconds} seconds</p>
+              <p><strong>Items Created:</strong> 500,000</p>
+            </div>
+          `;
+
+          // Wait a moment for the database to stabilize, then refetch
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await fetchData();
+        } catch (error) {
+          console.error("Error regenerating database:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error: ${error.message}`;
+        }
+      }
+
+      // Make a random update to a user's debitor
+      async function makeRandomUpdate(single) {
+        let updateCount = 0;
+        let lastUpdate = null;
+
+        try {
+          while (true) {
+            updateCount++;
+            document.getElementById("status").className = "status connected";
+            document.getElementById(
+              "status",
+            ).textContent = `Making random update #${updateCount}...`;
+
+            const startTime = performance.now();
+            const response = await fetch("/randomupdate", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+            });
+            const endTime = performance.now();
+            console.log(
+              `Random update took ${endTime - startTime} milliseconds.`,
+            );
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || "Failed to make update");
+            }
+
+            lastUpdate = await response.json();
+
+            // Wait for Gravel to settle (no updates for 2 seconds)
+            const settledResponse = await fetch("/settled");
+            if (!settledResponse.ok) {
+              throw new Error("Failed to wait for settled state");
+            }
+
+            // Fetch data from all endpoints
+            const [response1, response2, response3] = await Promise.all([
+              fetch("/data"),
+              fetch("/simplequery"),
+              // fetch("/oldwatchquery"),
+            ]);
+
+            if (!response1.ok || !response2.ok) {
+              throw new Error("Failed to fetch data for comparison");
+            }
+
+            const data1 = await response1.json();
+            const data2 = (await response2.json()).result;
+            // const data3 = await response3.json();
+
+            // Always update tables with current data
+            document.getElementById("tableContainer1").innerHTML = createTable(
+              data1,
+              "/data",
+            );
+            document.getElementById("tableContainer2").innerHTML = createTable(
+              data2,
+              "/simplequery",
+            );
+            // document.getElementById("tableContainer3").innerHTML = createTable(
+            //   data3,
+            //   "/oldwatchquery",
+            // );
+
+            updateLastUpdate();
+
+            // Update metrics after fetching data in the loop
+            await updateMetrics();
+
+            // Compare Gravel vs MongoDB
+            let comparison1 = compareData(data1, data2);
+            renderDiffSummary(comparison1, "diffSummary");
+
+            // Compare oldWatchQuery vs MongoDB (this is what we're testing)
+            // let comparison2 = compareData(data3, data2);
+            // renderDiffSummary(comparison2, "diffSummary2");
+
+            if (
+              // comparison2.differences.length > 0 ||
+              comparison1.differences.length > 0
+            ) {
+              console.log("Gravel differences detected:", comparison1);
+              // Data differs but DON'T stop the loop - continue making updates
+              document.getElementById("status").className = "status connected";
+              document.getElementById(
+                "status",
+              ).textContent = `Grave differs (update #${updateCount})`;
+
+              // Display notification but continue loop
+              const notificationEl =
+                document.getElementById("updateNotification");
+
+              let diffList = "";
+              comparison1.differences.slice(0, 5).forEach((diff) => {
+                diffList += `<li>${escapeHtml(diff)}</li>`;
+              });
+              if (comparison1.differences.length > 5) {
+                diffList += `<li><em>... and ${
+                  comparison1.differences.length - 5
+                } more difference(s)</em></li>`;
+              }
+
+              notificationEl.innerHTML = `
+                <div class="update-notification" style="background-color: #fff3cd; border-color: #ffc107;">
+                  <h4>⚠️ Gravel vs MongoDB Difference Detected (Update #${updateCount})</h4>
+                  <p><strong>Operations Performed:</strong></p>
+                  <ul>
+                    <li><strong>Updates:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.updates || 0),
+                    )}</li>
+                    <li><strong>Replaces:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.replaces || 0),
+                    )}</li>
+                    <li><strong>Deletions:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.deletes || 0),
+                    )}</li>
+                    <li><strong>Insertions:</strong> ${escapeHtml(
+                      String(lastUpdate.operations?.inserts || 0),
+                    )}</li>
+                  </ul>
+                  <p style="margin-top: 10px;"><strong>OldWatchQuery found ${
+                    comparison1.differences.length
+                  } difference(s):</strong></p>
+                  <ul style="margin: 5px 0 0 0; padding-left: 20px;">
+                    ${diffList}
+                  </ul>
+                  <p style="margin-top: 10px;"><em>Continuing random updates...</em></p>
+                </div>
+              `;
+              return;
+            } else {
+              // Data is still identical, continue loop
+            }
+            if (single) return;
+          }
+        } catch (error) {
+          console.error("Error making random update:", error);
+          document.getElementById("status").className = "status error";
+          document.getElementById(
+            "status",
+          ).textContent = `Error after ${updateCount} update(s): ${error.message}`;
+        }
+      }
+
+      // Initialize on page load
+      window.addEventListener("DOMContentLoaded", () => {
+        initMetricsChart();
+        initBytesChart();
+        fetchData();
+      });
+    </script>
+  </body>
+</html>

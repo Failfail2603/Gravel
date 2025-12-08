@@ -3,7 +3,6 @@ package db
 import (
 	"gravel/json_patch"
 	"gravel/types"
-	"log"
 	"slices"
 	"strconv"
 	"strings"
@@ -138,9 +137,6 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 			// Extract document from patch value
 			if doc, ok := patch.Value.(types.Document); ok {
 				w.SaveAddDocumentToWindow(dbService, doc, index)
-				log.Printf("Added document to internal watchquery")
-			} else {
-				log.Printf("Wanted to add to internal but value was not a document: %v", patch.Value)
 			}
 		case "remove":
 			// Extract index from path
@@ -149,14 +145,14 @@ func (w *WatchQuery) SavePatches(dbService *DBService, patches []json_patch.JSON
 			// only remove if the remove is set on an index. aka there is nothing behind the index
 			if !pathFurtherExtended {
 				w.SaveRemoveDocumentFromWindow(index)
-				log.Printf("Removed document from internal watchquery")
+
 			}
 		case "move":
 			// Extract old index from "from" and new index from "path"
 			oldIndex, _ := parseIndexFromPath(patch.From)
 			newIndex, _ := parseIndexFromPath(patch.Path)
 			w.SaveMoveDocumentInWindow(oldIndex, newIndex)
-			log.Printf("Moved document in internal watchquery")
+
 		case "replace":
 			// Check if this is a replace on a sorted field
 			index, field := parseIndexAndFieldFromPath(patch.Path)

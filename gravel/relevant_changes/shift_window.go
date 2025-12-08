@@ -110,7 +110,6 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 }
 
 func GetSingleDocumentOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, index int) []types.Document {
-	start := time.Now()
 	// Parse the original options preserving structure for fields we don't modify
 	var optionsRaw struct {
 		Sort       json.RawMessage        `json:"sort,omitempty"`
@@ -168,6 +167,5 @@ func GetSingleDocumentOnIndex(dbService *db.DBService, watchQuery *db.WatchQuery
 	// save the document to the cache
 	change.UpdateCache[index] = documents[0]
 
-	log.Printf("GetSingleDocumentOnIndex took %s\n", time.Since(start))
 	return documents
 }

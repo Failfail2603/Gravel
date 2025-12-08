@@ -3,16 +3,13 @@ import { ObjectId } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
+  type GravelTestData,
   collectionSize,
   customBulkOperationGenerator,
   options,
-  overrideDeleteNumber,
-  overrideInsertNumber,
-  overrideReplaceNumber,
-  overrideUpdateNumber,
   query,
-  type GravelTestData,
 } from "./config.js";
+
 import {
   generateRandomAddress,
   generateRandomBirthday,
@@ -28,6 +25,7 @@ import {
   resetLastUpdateTimestamp,
   restartWatchQuery,
   stopWatchQuery,
+  waitForNextUpdate,
   waitForSettled,
 } from "./gravelClient.js";
 import {
@@ -107,6 +105,7 @@ router.get("/metrics", (req: Request, res: Response) => {
 });
 
 // API endpoint to make random updates, deletions, and insertions to multiple users
+// Now performs only ONE operation type per call for measurement purposes
 router.post("/randomupdate", async (req: Request, res: Response) => {
   try {
     makingUpdates = true;
@@ -125,41 +124,8 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
       return;
     }
 
-    // Calculate the target size to maintain (within 5% of collectionSize)
     const targetSize = collectionSize;
     const sizeDelta = totalUsers - targetSize;
-
-    // Determine operations distribution
-    const maxOpsPerType = Math.min(
-      50,
-      Math.max(1, Math.floor(totalUsers / 100)),
-    );
-
-    // Calculate number of operations
-    let numDeletes = Math.floor(Math.random() * maxOpsPerType) + 1;
-    let numInserts = Math.floor(Math.random() * maxOpsPerType) + 1;
-    const numUpdates = Math.floor(Math.random() * maxOpsPerType) + 1;
-    const numReplaces = Math.floor(Math.random() * maxOpsPerType) + 1;
-
-    // Adjust deletions and insertions to maintain size near target
-    if (sizeDelta > 0) {
-      // Too many documents - favor deletions
-      numDeletes = Math.min(
-        numDeletes + Math.floor(sizeDelta * 0.1),
-        maxOpsPerType,
-      );
-      numInserts = Math.max(1, Math.floor(numInserts * 0.5));
-    } else if (sizeDelta < 0) {
-      // Too few documents - favor insertions
-      numInserts = Math.min(
-        numInserts + Math.floor(Math.abs(sizeDelta) * 0.1),
-        maxOpsPerType,
-      );
-      numDeletes = Math.max(1, Math.floor(numDeletes * 0.5));
-    }
-
-    // Ensure we don't delete all documents
-    numDeletes = Math.min(numDeletes, Math.floor(totalUsers * 0.05));
 
     let bulkOps: any[] = [];
     let operationStats = {
@@ -168,6 +134,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
       inserts: 0,
       replaces: 0,
     };
+    let operationType = "";
 
     // Check if custom bulk operation generator is defined
     if (customBulkOperationGenerator) {
@@ -177,108 +144,174 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
       );
       bulkOps = customResult.bulkOps;
       operationStats = customResult.stats;
+      operationType = "custom";
     } else {
-      // Default random operations
-      // 1. UPDATES - Get random users to update
-      const usersToUpdate = await collection
-        .aggregate([{ $sample: { size: overrideUpdateNumber ?? numUpdates } }])
-        .toArray();
+      // Randomly choose ONE operation type
+      const operations = ["update", "replace", "delete", "insert"];
 
-      for (const user of usersToUpdate) {
-        const updateFields = generateRandomUpdateFields();
-        bulkOps.push({
-          updateOne: {
-            filter: { _id: user._id },
-            update: { $set: updateFields },
-          },
-        });
-        operationStats.updates++;
+      // Adjust operation selection based on collection size
+      let selectedOp;
+      if (sizeDelta > targetSize * 0.1) {
+        // Too many documents - favor deletions
+        selectedOp =
+          Math.random() < 0.6
+            ? "delete"
+            : operations[Math.floor(Math.random() * operations.length)];
+      } else if (sizeDelta < -targetSize * 0.1) {
+        // Too few documents - favor insertions
+        selectedOp =
+          Math.random() < 0.6
+            ? "insert"
+            : operations[Math.floor(Math.random() * operations.length)];
+      } else {
+        // Normal distribution
+        selectedOp = operations[Math.floor(Math.random() * operations.length)];
       }
 
-      // 2. REPLACES - Get random users to replace with completely new data
-      const usersToReplace = await collection
-        .aggregate([
-          { $sample: { size: overrideReplaceNumber ?? numReplaces } },
-        ])
-        .toArray();
+      operationType = selectedOp;
 
-      for (const user of usersToReplace) {
-        const replacementDocument: GravelTestData = {
-          _id: user._id, // Keep the same _id
-          email: generateRandomEmail(),
-          roles: generateRandomRoles(),
-          address: generateRandomAddress(),
-          debitor: generateRandomDebitor(),
-          tags: generateRandomTags(),
-          sepa: generateRandomSepa(),
-        };
+      switch (selectedOp) {
+        case "update": {
+          // UPDATES - Get one random user to update
+          const usersToUpdate = await collection
+            .aggregate([{ $sample: { size: 1 } }])
+            .toArray();
 
-        // Optional fields - 50% chance for archived
-        if (Math.random() > 0.5) {
-          replacementDocument.archived = Math.random() > 0.5;
+          for (const user of usersToUpdate) {
+            const updateFields = generateRandomUpdateFields();
+            bulkOps.push({
+              updateOne: {
+                filter: { _id: user._id },
+                update: { $set: updateFields },
+              },
+            });
+            operationStats.updates++;
+          }
+          break;
         }
 
-        // Optional fields - 70% chance for birthday
-        if (Math.random() > 0.3) {
-          replacementDocument.birthday = generateRandomBirthday();
+        case "replace": {
+          // REPLACES - Get one random user to replace with completely new data
+          const usersToReplace = await collection
+            .aggregate([{ $sample: { size: 1 } }])
+            .toArray();
+
+          for (const user of usersToReplace) {
+            const replacementDocument: GravelTestData = {
+              _id: user._id, // Keep the same _id
+              email: generateRandomEmail(),
+              roles: generateRandomRoles(),
+              address: generateRandomAddress(),
+              debitor: generateRandomDebitor(),
+              tags: generateRandomTags(),
+              sepa: generateRandomSepa(),
+            };
+
+            // Optional fields - 50% chance for archived
+            if (Math.random() > 0.5) {
+              replacementDocument.archived = Math.random() > 0.5;
+            }
+
+            // Optional fields - 70% chance for birthday
+            if (Math.random() > 0.3) {
+              replacementDocument.birthday = generateRandomBirthday();
+            }
+
+            bulkOps.push({
+              replaceOne: {
+                filter: { _id: user._id },
+                replacement: replacementDocument,
+              },
+            });
+            operationStats.replaces++;
+          }
+          break;
         }
 
-        bulkOps.push({
-          replaceOne: {
-            filter: { _id: user._id },
-            replacement: replacementDocument,
-          },
-        });
-        operationStats.replaces++;
-      }
+        case "delete": {
+          // DELETIONS - Get one random user to delete (but ensure we don't delete all)
+          if (totalUsers > Math.max(100, targetSize * 0.1)) {
+            const usersToDelete = await collection
+              .aggregate([{ $sample: { size: 1 } }])
+              .toArray();
 
-      // 3. DELETIONS - Get random users to delete
-      const usersToDelete = await collection
-        .aggregate([{ $sample: { size: overrideDeleteNumber ?? numDeletes } }])
-        .toArray();
+            for (const user of usersToDelete) {
+              bulkOps.push({
+                deleteOne: {
+                  filter: { _id: user._id },
+                },
+              });
+              operationStats.deletes++;
+            }
+          } else {
+            // Skip deletion if collection is too small, do an insert instead
+            operationType = "insert";
+            const newDocument: GravelTestData = {
+              _id: new ObjectId(),
+              email: generateRandomEmail(),
+              roles: generateRandomRoles(),
+              address: generateRandomAddress(),
+              debitor: generateRandomDebitor(),
+              tags: generateRandomTags(),
+              sepa: generateRandomSepa(),
+            };
 
-      for (const user of usersToDelete) {
-        bulkOps.push({
-          deleteOne: {
-            filter: { _id: user._id },
-          },
-        });
-        operationStats.deletes++;
-      }
+            if (Math.random() > 0.5) {
+              newDocument.archived = Math.random() > 0.5;
+            }
+            if (Math.random() > 0.3) {
+              newDocument.birthday = generateRandomBirthday();
+            }
 
-      // 4. INSERTIONS - Create new documents
-      for (let i = 0; i < (overrideInsertNumber ?? numInserts); i++) {
-        const newDocument: GravelTestData = {
-          _id: new ObjectId(),
-          email: generateRandomEmail(),
-          roles: generateRandomRoles(),
-          address: generateRandomAddress(),
-          debitor: generateRandomDebitor(),
-          tags: generateRandomTags(),
-          sepa: generateRandomSepa(),
-        };
-
-        // Optional fields - 50% chance for archived
-        if (Math.random() > 0.5) {
-          newDocument.archived = Math.random() > 0.5;
+            bulkOps.push({
+              insertOne: {
+                document: newDocument,
+              },
+            });
+            operationStats.inserts++;
+          }
+          break;
         }
 
-        // Optional fields - 70% chance for birthday
-        if (Math.random() > 0.3) {
-          newDocument.birthday = generateRandomBirthday();
-        }
+        case "insert": {
+          // INSERTIONS - Create one new document
+          const newDocument: GravelTestData = {
+            _id: new ObjectId(),
+            email: generateRandomEmail(),
+            roles: generateRandomRoles(),
+            address: generateRandomAddress(),
+            debitor: generateRandomDebitor(),
+            tags: generateRandomTags(),
+            sepa: generateRandomSepa(),
+          };
 
-        bulkOps.push({
-          insertOne: {
-            document: newDocument,
-          },
-        });
-        operationStats.inserts++;
+          // Optional fields - 50% chance for archived
+          if (Math.random() > 0.5) {
+            newDocument.archived = Math.random() > 0.5;
+          }
+
+          // Optional fields - 70% chance for birthday
+          if (Math.random() > 0.3) {
+            newDocument.birthday = generateRandomBirthday();
+          }
+
+          bulkOps.push({
+            insertOne: {
+              document: newDocument,
+            },
+          });
+          operationStats.inserts++;
+          break;
+        }
       }
     }
 
-    // Execute bulk write operations
+    // Execute bulk write operations (now only 1 operation)
     const bulkResult = await collection.bulkWrite(bulkOps, { ordered: false });
+
+    // Wait for Gravel to process the update (patch or noop)
+    // This replaces the old timeout-based /settled approach
+    await waitForNextUpdate();
 
     // Get updated count
     const newTotalUsers = await collection.countDocuments({});
@@ -294,6 +327,7 @@ router.post("/randomupdate", async (req: Request, res: Response) => {
     resetLastUpdateTimestamp();
     res.json({
       success: true,
+      operationType,
       operations: {
         updates: operationStats.updates,
         deletes: operationStats.deletes,
@@ -348,4 +382,113 @@ router.get("/settled", async (req: Request, res: Response) => {
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
+});
+
+// Measurement statistics storage
+interface MeasurementStats {
+  gravel: {
+    truePositive: number;
+    trueNegative: number;
+    falsePositive: number;
+    falseNegative: number;
+  };
+  oldWatchQuery: {
+    truePositive: number;
+    trueNegative: number;
+    falsePositive: number;
+    falseNegative: number;
+  };
+  totalTests: number;
+}
+
+let measurementStats: MeasurementStats = {
+  gravel: {
+    truePositive: 0,
+    trueNegative: 0,
+    falsePositive: 0,
+    falseNegative: 0,
+  },
+  oldWatchQuery: {
+    truePositive: 0,
+    trueNegative: 0,
+    falsePositive: 0,
+    falseNegative: 0,
+  },
+  totalTests: 0,
+};
+
+// Get measurement statistics
+router.get("/measurements", (req: Request, res: Response) => {
+  res.json(measurementStats);
+});
+
+// Reset measurement statistics
+router.post("/measurements/reset", (req: Request, res: Response) => {
+  measurementStats = {
+    gravel: {
+      truePositive: 0,
+      trueNegative: 0,
+      falsePositive: 0,
+      falseNegative: 0,
+    },
+    oldWatchQuery: {
+      truePositive: 0,
+      trueNegative: 0,
+      falsePositive: 0,
+      falseNegative: 0,
+    },
+    totalTests: 0,
+  };
+  res.json({ success: true, message: "Measurements reset" });
+});
+
+// Record a measurement
+router.post("/measurements/record", (req: Request, res: Response) => {
+  const { measurements } = req.body;
+
+  if (!measurements || !Array.isArray(measurements)) {
+    res.status(400).json({ error: "Missing or invalid measurements array" });
+    return;
+  }
+
+  const validOutcomes = [
+    "truePositive",
+    "trueNegative",
+    "falsePositive",
+    "falseNegative",
+  ];
+
+  // Process each measurement
+  for (const measurement of measurements) {
+    const { system, outcome } = measurement;
+
+    if (!system || !outcome) {
+      res
+        .status(400)
+        .json({ error: "Missing system or outcome in measurement" });
+      return;
+    }
+
+    if (system !== "gravel" && system !== "oldWatchQuery") {
+      res
+        .status(400)
+        .json({ error: "Invalid system. Must be 'gravel' or 'oldWatchQuery'" });
+      return;
+    }
+
+    if (!validOutcomes.includes(outcome)) {
+      res.status(400).json({ error: "Invalid outcome" });
+      return;
+    }
+
+    const systemKey = system as "gravel" | "oldWatchQuery";
+    measurementStats[systemKey][
+      outcome as keyof typeof measurementStats.gravel
+    ]++;
+  }
+
+  // Only increment totalTests once per request
+  measurementStats.totalTests++;
+
+  res.json({ success: true, stats: measurementStats });
 });
