@@ -48,6 +48,36 @@ export const router = express.Router();
 
 export let makingUpdates = false;
 
+let __seed = 123456789;
+const __glibcMul = 1103515245;
+const __glibcInc = 12345;
+const __glibcRandMaxPlus1 = 0x80000000; // 2^31
+
+function __glibcNext(seed: number): number {
+  return (Math.imul(seed >>> 0, __glibcMul) + __glibcInc) >>> 0;
+}
+
+function __glibcRandR(): number {
+  let next = __seed >>> 0;
+  let result: number;
+
+  next = __glibcNext(next);
+  result = (((next / 65536) >>> 0) % 2048) | 0;
+
+  next = __glibcNext(next);
+  result = (result << 10) ^ ((((next / 65536) >>> 0) % 1024) | 0);
+
+  next = __glibcNext(next);
+  result = (result << 10) ^ ((((next / 65536) >>> 0) % 1024) | 0);
+
+  __seed = next >>> 0;
+  return result >>> 0;
+}
+
+Math.random = function (): number {
+  return __glibcRandR() / __glibcRandMaxPlus1;
+};
+
 // Serve static HTML
 router.get("/", (req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, "viewer.html"));

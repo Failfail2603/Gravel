@@ -1,4 +1,4 @@
-import type { Collection, ObjectId } from "mongodb";
+import { Collection, ObjectId } from "mongodb";
 import type { GravelMongoWatchQueryFindOptions } from "../db/mongo.js";
 
 export const PORT = 3000;
@@ -50,28 +50,70 @@ export interface GravelTestData {
   }[];
 }
 
-export const query: any = {
-  roles: { $elemMatch: { role: "editor" } },
-  debitor: { $lte: 500000 },
-};
+const queries: {
+  query: Record<string, any>;
+  options: GravelMongoWatchQueryFindOptions;
+}[] = [
+  // simple subscribe by _id
+  {
+    query: { _id: new ObjectId("693aa602358f323fc2b27129") },
+    options: {
+      sort: {
+        _id: 1,
+      },
+    },
+  },
+  {
+    query: {
+      roles: { $elemMatch: { role: "editor" } },
+      debitor: { $lte: 500000 },
+    },
+    options: {
+      sort: {
+        debitor: 1,
+        birthday: 1,
+        _id: 1,
+      },
+      skip: 0,
+      limit: 20,
+      projection: {
+        _id: 1,
+        email: 1,
+        archived: 1,
+        address: { street: 1, city: 1 },
+        debitor: 1,
+        birthday: 1,
+      },
+    },
+  },
+  {
+    query: {
+      roles: { $elemMatch: { role: "editor" } },
+      debitor: { $lte: 500000 },
+    },
+    options: {
+      sort: {
+        debitor: 1,
+        birthday: 1,
+        _id: 1,
+      },
+      skip: 30000,
+      limit: 1000,
+      projection: {
+        _id: 1,
+        email: 1,
+        archived: 1,
+        address: { street: 1, city: 1 },
+        debitor: 1,
+        birthday: 1,
+      },
+    },
+  },
+];
 
-export const options: GravelMongoWatchQueryFindOptions = {
-  sort: {
-    debitor: 1,
-    birthday: 1,
-    _id: 1,
-  },
-  skip: 30000,
-  limit: 500,
-  projection: {
-    _id: 1,
-    email: 1,
-    archived: 1,
-    address: { street: 1, city: 1 },
-    debitor: 1,
-    birthday: 1,
-  },
-};
+export const query = queries[0].query;
+
+export const options = queries[0].options;
 
 /**
  * Example: Replace 2 non-matching documents with matching ones above the window
