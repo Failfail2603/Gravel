@@ -16,6 +16,11 @@ const (
 )
 
 func GetPositionOfDocumentRelativeToIndex(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, relativeTo int, docType DocumentType) (int, error) {
+	// If WatchedDocuments and this method is called we define that a document is above the window everytime as we cannot compare against the window
+	if len(watchQuery.WatchedDocuments) == 0 {
+		return 1, nil
+	}
+
 	var documentInfo types.WatchedDocument
 	var err error
 

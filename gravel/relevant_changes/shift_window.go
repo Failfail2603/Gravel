@@ -40,12 +40,8 @@ func isWindowShiftApplicable(watchQuery *db.WatchQuery, dir ShiftDirection) bool
 		return true
 	}
 
-	// we can shift down if the window end is not at the end of the cursor and there are documents
-	// there are two possibilities when a window is at the end of a cursor:
-	// 1. we have less documents than the limit -> the window is already exhausted and we cannot shift down
-	// 2. we have exactly the limit of documents at the end -> we cannot check this as we do not know if there are documents below
-	// this is the only edgecase where this function returns true but the window should not be shiftable. The shift function will need to check for this
-	if dir == ShiftDown && watchQuery.QueryInformation.WindowLimit != 0 && watchQuery.QueryInformation.WindowLimit == len(watchQuery.WatchedDocuments) {
+	// a downshift is always applicable on a windows query. A downshift could lead to an exhausted window or to no documents at all in the window but we dont care
+	if dir == ShiftDown {
 		return true
 	}
 
@@ -75,22 +71,27 @@ func ShiftWindow(dbService *db.DBService, watchQuery *db.WatchQuery, dir ShiftDi
 			baseIndex, index, change.BatchShiftOffset)
 	}
 
+	// assemble the delete patch before getting a new document as a window shift will always try to delete a document
+
+	// make a patch to delete the document from the window in the end of the shift direction
+	// for up: only delete if the window is not exhausted as there are spaces available
+	// for down: always delete as there is no space available
+	if dir == ShiftUp && !watchQuery.IsExhaustedWindow() {
+		deletePatch := GetSimpleRemovePatch(len(watchQuery.WatchedDocuments) - 1)
+		patches = append(patches, deletePatch)
+	} else if dir == ShiftDown {
+		deletePatch := GetSimpleRemovePatch(0)
+		patches = append(patches, deletePatch)
+	}
+
 	// query the new document using session context from change event
 	newDocument := GetSingleDocumentOnIndex(dbService, watchQuery, change, index)
 
 	// Important: If we are at the end of the cursor the query should return an empty array as skip is automatically the number of documents in the system. This is an absolute edgecase as it can only happen if the last window in the cursor is completly full but there are not further documents
+	// on a shift up on an empty window were the skip is so high that the query returns an empty array this is also the case. Here we just return a empty patch array as we cannot shift the window
 	if len(newDocument) == 0 {
 		return patches
 	}
-
-	// make a patch to delete the document from the window in the end of the shift direction
-	removeIndex := 0
-	if dir == ShiftUp {
-		removeIndex = len(watchQuery.WatchedDocuments) - 1
-	}
-
-	deletePatch := GetSimpleRemovePatch(removeIndex)
-	patches = append(patches, deletePatch)
 
 	addIndex := 0
 	if dir == ShiftDown {

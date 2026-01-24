@@ -20,6 +20,12 @@ func getSortValuesFromDocument(document types.Document, sortFields []types.SortF
 }
 
 func getNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int {
+
+	// if documents is empty, return 0
+	if len(documents) == 0 {
+		return 0
+	}
+
 	if oldIndex < 0 || oldIndex >= len(documents) {
 		return oldIndex // Invalid index, return as-is
 	}

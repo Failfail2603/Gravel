@@ -185,6 +185,16 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 			return []json_patch.JSONPatch{}
 		}
 
+		// if WatchedDocuments is empty and the window is not skipped we can insert the entry at position 0
+		if len(watchQuery.WatchedDocuments) == 0 && watchQuery.QueryInformation.WindowStart == 0 {
+			newDocument, err := dbService.Connection.ProjectDocument(types.Document(doc.(primitive.M)), watchQuery.Options, "")
+			if err != nil {
+				log.Printf("Error projecting document: %v", err)
+				return []json_patch.JSONPatch{}
+			}
+			return []json_patch.JSONPatch{GetSimpleAddPatch(0, newDocument)}
+		}
+
 		// check if the position of the updated document should be above the window
 		beforePositionRelativeToFirst, err := GetPositionOfDocumentRelativeToIndex(dbService, watchQuery, change, 0, New)
 		if err != nil {
@@ -194,7 +204,6 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 
 		// if the update would be above the current window we shift one up to keep the correct skip
 		if beforePositionRelativeToFirst == 1 {
-
 			return ShiftWindow(dbService, watchQuery, ShiftUp, change)
 		}
 
@@ -205,17 +214,15 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 			return []json_patch.JSONPatch{}
 		}
 
-		// if the update is below the window we can ignore it
-		if beforePositionRelativeToLast == -1 {
-
+		// if the update is below the last document and the window is not exhausted we can ignore it as it would fall below the window
+		if beforePositionRelativeToLast == -1 && !watchQuery.IsExhaustedWindow() {
 			return []json_patch.JSONPatch{}
 		}
 
 		patches := []json_patch.JSONPatch{}
 
-		// remove the last document from the window if the query is limited
-		// early return if it is an exhausted window or no limit was specified
-		if !watchQuery.IsExhaustedWindow() || watchQuery.QueryInformation.WindowLimit != 0 {
+		// we now know that the document is inside the window we now need to check if the window is exhausted and we need to make room
+		if !watchQuery.IsExhaustedWindow() {
 			patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
 		}
 
@@ -223,7 +230,9 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 		// get the new index for the document
 		newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, documentInfo, watchQuery.QueryInformation.SortFields)
 
-		// get the document
+		log.Printf("New index: %d", newIndex)
+
+		// get the document at the new index. we cannot take the document
 		newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart+newIndex)
 
 		// add the document at the correct position inside the window
@@ -247,6 +256,21 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 	documentInfo, err := dbService.Connection.GetWatchedDocumentInfo(types.Document(doc.(primitive.M)), watchQuery.QueryInformation)
 	if err != nil {
 		log.Printf("Error getting watched document info: %v", err)
+		return []json_patch.JSONPatch{}
+	}
+
+	// if WatchedDocuments is empty, handle based on skip value
+	if len(watchQuery.WatchedDocuments) == 0 {
+		// If no skip, we can insert at position 0
+		if watchQuery.QueryInformation.WindowStart == 0 {
+			newDocument, err := dbService.Connection.ProjectDocument(types.Document(doc.(primitive.M)), watchQuery.Options, "")
+			if err != nil {
+				log.Printf("Error projecting document: %v", err)
+				return []json_patch.JSONPatch{}
+			}
+			return []json_patch.JSONPatch{GetSimpleAddPatch(0, newDocument)}
+		}
+		// If there's a skip value but no documents, we can't determine position - return empty
 		return []json_patch.JSONPatch{}
 	}
 
@@ -435,6 +459,21 @@ func getFilteredAndSortedUpdatedPatches(dbService *db.DBService, watchQuery *db.
 		documentInfo, err := dbService.Connection.GetWatchedDocumentInfo(types.Document(doc.(primitive.M)), watchQuery.QueryInformation)
 		if err != nil {
 			log.Printf("Error getting watched document info: %v", err)
+			return []json_patch.JSONPatch{}
+		}
+
+		// if WatchedDocuments is empty, handle based on skip value
+		if len(watchQuery.WatchedDocuments) == 0 {
+			// If no skip, we can insert at position 0
+			if watchQuery.QueryInformation.WindowStart == 0 {
+				newDocument, err := dbService.Connection.ProjectDocument(types.Document(doc.(primitive.M)), watchQuery.Options, "")
+				if err != nil {
+					log.Printf("Error projecting document: %v", err)
+					return []json_patch.JSONPatch{}
+				}
+				return []json_patch.JSONPatch{GetSimpleAddPatch(0, newDocument)}
+			}
+			// If there's a skip value but no documents, we can't determine position - return empty
 			return []json_patch.JSONPatch{}
 		}
 

@@ -96,8 +96,8 @@ func (w *WatchQuery) SaveAddDocumentToWindow(dbService *DBService, document type
 		return
 	}
 
-	// end of window is -1
-	if documentIndex == -1 {
+	// end of window is -1, or index is at/beyond current length (append case)
+	if documentIndex == -1 || documentIndex >= len(w.WatchedDocuments) {
 		w.WatchedDocuments = append(w.WatchedDocuments, watchedDocument)
 		return
 	}

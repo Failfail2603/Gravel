@@ -82,6 +82,21 @@ func handleReplaceAsInsert(dbService *db.DBService, watchQuery *db.WatchQuery, c
 		return []json_patch.JSONPatch{GetSimpleAddPatch(newIndex, newDocument)}
 	}
 
+	// if WatchedDocuments is empty, handle based on skip value
+	if len(watchQuery.WatchedDocuments) == 0 {
+		// If no skip, we can insert at position 0
+		if watchQuery.QueryInformation.WindowStart == 0 {
+			newDocument, err := dbService.Connection.ProjectDocument(types.Document(change.FullDocument.(primitive.M)), watchQuery.Options, "")
+			if err != nil {
+				log.Printf("Error projecting document: %v", err)
+				return []json_patch.JSONPatch{}
+			}
+			return []json_patch.JSONPatch{GetSimpleAddPatch(0, newDocument)}
+		}
+		// If there's a skip value but no documents, we can't determine position - return empty
+		return []json_patch.JSONPatch{}
+	}
+
 	// Check if document should be above the window
 	if watchQuery.QueryInformation.WindowStart != 0 {
 		positionRelativeToFirst := dbService.Connection.GetSortingOrder(documentInfo, watchQuery.WatchedDocuments[0], watchQuery.QueryInformation)
@@ -138,6 +153,11 @@ func handleReplaceWithBothMatching(dbService *db.DBService, watchQuery *db.Watch
 
 // handleReplaceInWindow handles replace when the document is currently in the window
 func handleReplaceInWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, newDocumentInfo types.WatchedDocument, documentIndex int) []json_patch.JSONPatch {
+
+	// if WatchedDocuments is empty, just return a replace patch at the document index
+	if len(watchQuery.WatchedDocuments) == 0 {
+		return []json_patch.JSONPatch{getReplaceValuePatch(dbService, watchQuery, change, documentIndex)}
+	}
 
 	// Check if document should move above the window
 	positionRelativeToFirst := dbService.Connection.GetSortingOrder(newDocumentInfo, watchQuery.WatchedDocuments[0], watchQuery.QueryInformation)
@@ -199,6 +219,21 @@ func handleReplaceInWindow(dbService *db.DBService, watchQuery *db.WatchQuery, c
 
 // handleReplaceOutsideWindow handles replace when the document is outside the window
 func handleReplaceOutsideWindow(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent, newDocumentInfo types.WatchedDocument) []json_patch.JSONPatch {
+
+	// if WatchedDocuments is empty, handle based on skip value
+	if len(watchQuery.WatchedDocuments) == 0 {
+		// If no skip, we can insert at position 0
+		if watchQuery.QueryInformation.WindowStart == 0 {
+			newDocument, err := dbService.Connection.ProjectDocument(types.Document(change.FullDocument.(primitive.M)), watchQuery.Options, "")
+			if err != nil {
+				log.Printf("Error projecting document: %v", err)
+				return []json_patch.JSONPatch{}
+			}
+			return []json_patch.JSONPatch{GetSimpleAddPatch(0, newDocument)}
+		}
+		// If there's a skip value but no documents, we can't determine position - return empty
+		return []json_patch.JSONPatch{}
+	}
 
 	// Check if document should move into window from above or below
 	positionRelativeToFirst := dbService.Connection.GetSortingOrder(newDocumentInfo, watchQuery.WatchedDocuments[0], watchQuery.QueryInformation)

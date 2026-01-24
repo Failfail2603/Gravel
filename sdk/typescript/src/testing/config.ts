@@ -95,6 +95,29 @@ export const experimentQueries: {
   //   },
   // },
   {
+    name: "test",
+    query: {
+      roles: { $elemMatch: { role: "yeet" } },
+    },
+    options: {
+      sort: {
+        debitor: 1,
+        birthday: 1,
+        _id: 1,
+      },
+      skip: 2,
+      limit: 20,
+      projection: {
+        _id: 1,
+        email: 1,
+        archived: 1,
+        address: { street: 1, city: 1 },
+        debitor: 1,
+        birthday: 1,
+      },
+    },
+  },
+  {
     name: "editors_deep_pagination",
     query: {
       roles: { $elemMatch: { role: "editor" } },

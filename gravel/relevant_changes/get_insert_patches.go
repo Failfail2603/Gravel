@@ -78,7 +78,11 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	// in the case of a finite window we need to check if the document would fall into the window
 	// check if above the window can even exist
 	if watchQuery.QueryInformation.WindowStart != 0 {
-		positionRelativeToFirst := dbService.Connection.GetSortingOrder(documentInfo, watchQuery.WatchedDocuments[0], watchQuery.QueryInformation)
+		positionRelativeToFirst, err := GetPositionOfDocumentRelativeToIndex(dbService, watchQuery, change, 0, New)
+		if err != nil {
+			log.Printf("Error getting position of document relative to first: %v", err)
+			return []json_patch.JSONPatch{}
+		}
 
 		// if the document is above the window we need to shift the window up
 		if positionRelativeToFirst == 1 {
@@ -87,16 +91,18 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	}
 
 	// check if below the window
-	positionRelativeToLast := dbService.Connection.GetSortingOrder(documentInfo, watchQuery.WatchedDocuments[len(watchQuery.WatchedDocuments)-1], watchQuery.QueryInformation)
+	positionRelativeToLast, err := GetPositionOfDocumentRelativeToIndex(dbService, watchQuery, change, -1, New)
 
-	// if the document is below, nothing would shift so ignore it
-	if positionRelativeToLast == -1 {
+	// if the document is below the last document and the window is not exhausted we can ignore it as it would fall below the window
+	if positionRelativeToLast == -1 && !watchQuery.IsExhaustedWindow() {
 		return []json_patch.JSONPatch{}
 	}
 
-	// add a remove patch for the last document
+	// add a remove patch for the last document if the window is not exhausted
 	patches := []json_patch.JSONPatch{}
-	patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+	if !watchQuery.IsExhaustedWindow() {
+		patches = append(patches, GetSimpleRemovePatch(len(watchQuery.WatchedDocuments)-1))
+	}
 
 	// at this point the document is definitely in the window, so we can just add it
 	patches = append(patches, addDocumentToWindow(dbService, watchQuery, change, documentInfo)...)
