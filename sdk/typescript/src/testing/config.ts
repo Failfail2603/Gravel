@@ -4,7 +4,12 @@ import type { GravelMongoWatchQueryFindOptions } from "../db/mongo.js";
 export const PORT = 3000;
 export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
-export const collectionSize = 500000;
+
+// Experiment configuration
+export const UPDATES_PER_QUERY = 20;
+export const REPETITIONS_PER_QUERY = 3;
+export const DEFAULT_EXPERIMENT_SEED = 123456789;
+export const DEFAULT_COLLECTION_SIZE = 50000;
 
 // Custom bulk operation generator type
 export interface BulkOperationStats {
@@ -50,20 +55,23 @@ export interface GravelTestData {
   }[];
 }
 
-const queries: {
+export const experimentQueries: {
+  name: string;
   query: Record<string, any>;
   options: GravelMongoWatchQueryFindOptions;
 }[] = [
   // simple subscribe by _id
+  // {
+  //   name: "single_document_by_id",
+  //   query: { _id: new ObjectId("693aa602358f323fc2b27129") },
+  //   options: {
+  //     sort: {
+  //       _id: 1,
+  //     },
+  //   },
+  // },
   {
-    query: { _id: new ObjectId("693aa602358f323fc2b27129") },
-    options: {
-      sort: {
-        _id: 1,
-      },
-    },
-  },
-  {
+    name: "editors_first_page",
     query: {
       roles: { $elemMatch: { role: "editor" } },
       debitor: { $lte: 500000 },
@@ -87,6 +95,7 @@ const queries: {
     },
   },
   {
+    name: "editors_deep_pagination",
     query: {
       roles: { $elemMatch: { role: "editor" } },
       debitor: { $lte: 500000 },
@@ -111,9 +120,9 @@ const queries: {
   },
 ];
 
-export const query = queries[0].query;
+export const query = experimentQueries[0].query;
 
-export const options = queries[0].options;
+export const options = experimentQueries[0].options;
 
 /**
  * Example: Replace 2 non-matching documents with matching ones above the window

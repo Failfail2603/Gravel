@@ -17,6 +17,13 @@ import {
 } from "rxjs/operators";
 import { getMongoClient, mongoClient } from "./mongoClient.js";
 
+/**
+ * Symbol emitted when a change event is received but filtered out as irrelevant (noop).
+ * This allows subscribers to distinguish between "no change" and "change was ignored".
+ */
+export const NOOP_CHANGE = Symbol("NOOP_CHANGE");
+export type NoopChange = typeof NOOP_CHANGE;
+
 let counter = 0;
 
 export function getCurrentWatchQueryCount() {
@@ -125,7 +132,7 @@ export function watchQuery<T extends Document>(
   collectionName: string,
   query: Record<string, any>,
   options: FindOptions<any> = {},
-): Observable<T[]> {
+): Observable<T[] | NoopChange> {
   let lastIDs: string[] = [];
 
   const subject = getChangeStreamSubject();
@@ -162,9 +169,11 @@ export function watchQuery<T extends Document>(
           lastIDs = freshData.map((r) => r._id.toString());
 
           return freshData as unknown as T[];
+        } else {
+          // Change was filtered out as irrelevant - return noop symbol
+          return NOOP_CHANGE;
         }
       }),
-      filter(Boolean),
       throttleTime(500, undefined, { leading: true, trailing: true }),
     ),
   ).pipe(

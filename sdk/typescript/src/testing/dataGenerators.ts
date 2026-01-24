@@ -1,4 +1,5 @@
 import { faker } from "@faker-js/faker";
+import "./randomGenerator.js";
 
 export function generateRandomEmail(): string {
   return faker.internet.email();

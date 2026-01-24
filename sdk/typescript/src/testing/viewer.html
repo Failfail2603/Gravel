@@ -1,9 +1,10 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gravel Measurement System - Confusion Matrices</title>
+    <title>Gravel Experiment Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
       * {
         box-sizing: border-box;
@@ -12,1058 +13,1029 @@
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         margin: 0;
         padding: 20px;
-        background-color: #f5f5f5;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        min-height: 100vh;
+        color: #e0e0e0;
       }
       .container {
-        max-width: 1800px;
+        max-width: 1400px;
         margin: 0 auto;
-        background: white;
-        padding: 30px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
       h1 {
-        color: #333;
+        color: #fff;
         margin-top: 0;
+        font-size: 2rem;
+        display: flex;
+        align-items: center;
+        gap: 12px;
       }
       h2 {
-        color: #555;
+        color: #a0a0a0;
         margin-top: 30px;
-        border-bottom: 2px solid #4caf50;
-        padding-bottom: 10px;
+        font-size: 1.1rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
       }
-      .status {
-        padding: 15px;
-        border-radius: 4px;
+      .card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 24px;
         margin-bottom: 20px;
-        font-size: 16px;
+        backdrop-filter: blur(10px);
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        border-radius: 20px;
         font-weight: 600;
+        font-size: 14px;
       }
-      .status.running {
-        background-color: #d1ecf1;
-        color: #0c5460;
-        border: 2px solid #17a2b8;
+      .status-badge.idle {
+        background: rgba(108, 117, 125, 0.3);
+        color: #adb5bd;
       }
-      .status.success {
-        background-color: #d4edda;
-        color: #155724;
-        border: 2px solid #28a745;
+      .status-badge.running {
+        background: rgba(40, 167, 69, 0.3);
+        color: #51cf66;
+        animation: pulse 2s infinite;
       }
-      .status.error {
-        background-color: #f8d7da;
-        color: #721c24;
-        border: 2px solid #dc3545;
+      .status-badge.regenerating {
+        background: rgba(255, 193, 7, 0.3);
+        color: #ffd43b;
       }
-      .status.idle {
-        background-color: #e2e3e5;
-        color: #383d41;
-        border: 2px solid #6c757d;
+      .status-badge.complete {
+        background: rgba(32, 201, 151, 0.3);
+        color: #38d9a9;
+      }
+      .status-badge.error {
+        background: rgba(220, 53, 69, 0.3);
+        color: #ff6b6b;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
       }
       .controls {
         display: flex;
         gap: 15px;
-        margin-bottom: 30px;
+        margin-bottom: 20px;
         flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .control-group label {
+        font-size: 12px;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
       .btn {
-        background-color: #4caf50;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
         padding: 12px 24px;
-        font-size: 16px;
-        border-radius: 4px;
+        font-size: 14px;
+        border-radius: 8px;
         cursor: pointer;
         font-weight: 600;
-        transition: background-color 0.2s;
+        transition: all 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
       .btn:hover {
-        background-color: #45a049;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
       }
       .btn:disabled {
-        background-color: #cccccc;
+        background: #444;
         cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
       }
-      .btn.danger {
-        background-color: #dc3545;
+      .btn-stop {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
       }
-      .btn.danger:hover {
-        background-color: #c82333;
-      }
-      .btn.warning {
-        background-color: #ffc107;
-        color: #212529;
-      }
-      .btn.warning:hover {
-        background-color: #e0a800;
-      }
-      .btn.secondary {
-        background-color: #6c757d;
-      }
-      .btn.secondary:hover {
-        background-color: #5a6268;
+      .btn-stop:hover {
+        box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
       }
       input[type="number"] {
-        padding: 10px;
-        font-size: 16px;
-        border: 2px solid #ddd;
-        border-radius: 4px;
-        width: 150px;
-      }
-      label {
-        font-weight: 600;
-        margin-right: 10px;
-      }
-      .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-        gap: 30px;
-        margin-top: 30px;
-      }
-      .confusion-matrix-section {
-        border: 2px solid #ddd;
+        padding: 12px;
+        font-size: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 8px;
-        padding: 20px;
-        background: #fafafa;
+        width: 150px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
       }
-      .confusion-matrix-section h3 {
-        margin-top: 0;
-        color: #333;
-        text-align: center;
+      input[type="number"]:focus {
+        outline: none;
+        border-color: #667eea;
       }
-      .confusion-matrix {
-        display: grid;
-        grid-template-columns: 80px 1fr 1fr;
-        grid-template-rows: 80px 1fr 1fr;
-        gap: 2px;
-        margin: 20px auto;
-        max-width: 450px;
-        background: #ccc;
-        border: 2px solid #333;
+      .progress-bar-container {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        height: 20px;
+        overflow: hidden;
+        margin: 10px 0;
       }
-      .matrix-cell {
-        background: white;
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+        transition: width 0.3s ease;
         display: flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-end;
+        padding-right: 8px;
+        font-size: 11px;
         font-weight: 600;
-        padding: 15px;
-        min-height: 80px;
-      }
-      .matrix-header {
-        background: #4caf50;
         color: white;
-        font-size: 14px;
+        min-width: 30px;
+      }
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+      .stat-item {
         text-align: center;
-      }
-      .matrix-label {
-        background: #2196f3;
-        color: white;
-        font-size: 14px;
-        writing-mode: horizontal-tb;
-        text-align: center;
-      }
-      .matrix-value {
-        font-size: 32px;
-        flex-direction: column;
-      }
-      .matrix-value .label {
-        font-size: 12px;
-        color: #666;
-        margin-bottom: 5px;
-      }
-      .matrix-value .value {
-        font-size: 36px;
-        color: #333;
-      }
-      .matrix-corner {
-        background: #f5f5f5;
-        font-size: 12px;
-        color: #666;
-      }
-      .stats-summary {
-        margin-top: 20px;
-        padding: 15px;
-        background: white;
-        border-radius: 4px;
-        border: 1px solid #ddd;
-      }
-      .stats-summary h4 {
-        margin-top: 0;
-        color: #555;
-      }
-      .stat-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 8px 0;
-        border-bottom: 1px solid #eee;
-      }
-      .stat-row:last-child {
-        border-bottom: none;
-      }
-      .stat-label {
-        font-weight: 600;
-        color: #666;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
       }
       .stat-value {
+        font-size: 24px;
         font-weight: 700;
-        color: #333;
-        font-size: 18px;
+        color: #fff;
       }
-      .progress-info {
-        background: #e7f3ff;
-        padding: 15px;
-        border-radius: 4px;
-        margin-bottom: 20px;
-        border-left: 4px solid #2196f3;
+      .stat-label {
+        font-size: 11px;
+        color: #888;
+        margin-top: 4px;
+        text-transform: uppercase;
       }
-      .progress-info h3 {
-        margin-top: 0;
-        color: #1976d2;
-      }
-      .log-section {
-        margin-top: 30px;
-        max-height: 300px;
-        overflow-y: auto;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        padding: 15px;
-        background: #f9f9f9;
-        font-family: "Courier New", monospace;
-        font-size: 13px;
-      }
-      .log-entry {
-        margin: 5px 0;
-        padding: 5px;
-      }
-      .log-entry.error {
-        color: #dc3545;
-        font-weight: 600;
-      }
-      .log-entry.success {
-        color: #28a745;
-      }
-      .log-entry.info {
-        color: #17a2b8;
-      }
-      .bytes-metrics {
+
+      /* Confusion Matrix Styles */
+      .matrix-container {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: 1fr 1fr;
         gap: 20px;
-        margin-top: 30px;
+        margin-top: 16px;
       }
-      .bytes-card {
-        border: 2px solid #ddd;
+      .matrix-box {
+        background: rgba(255, 255, 255, 0.03);
         border-radius: 8px;
-        padding: 20px;
-        background: #fafafa;
+        padding: 16px;
       }
-      .bytes-card h3 {
-        margin-top: 0;
-        color: #333;
-        text-align: center;
-        font-size: 18px;
-      }
-      .bytes-value {
-        font-size: 48px;
-        font-weight: 700;
-        text-align: center;
-        color: #2196f3;
-        margin: 20px 0;
-      }
-      .bytes-label {
-        text-align: center;
-        color: #666;
+      .matrix-title {
         font-size: 14px;
         font-weight: 600;
+        margin-bottom: 12px;
+        color: #fff;
+      }
+      .matrix-grid {
+        display: grid;
+        grid-template-columns: auto 1fr 1fr;
+        grid-template-rows: auto 1fr 1fr;
+        gap: 4px;
+        font-size: 12px;
+      }
+      .matrix-header {
+        text-align: center;
+        padding: 8px;
+        color: #888;
+        font-weight: 600;
+      }
+      .matrix-cell {
+        text-align: center;
+        padding: 12px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+      .matrix-cell.tp {
+        background: rgba(40, 167, 69, 0.3);
+        color: #51cf66;
+      }
+      .matrix-cell.tn {
+        background: rgba(40, 167, 69, 0.2);
+        color: #69db7c;
+      }
+      .matrix-cell.fp {
+        background: rgba(255, 193, 7, 0.3);
+        color: #ffd43b;
+      }
+      .matrix-cell.fn {
+        background: rgba(220, 53, 69, 0.3);
+        color: #ff6b6b;
+      }
+      .matrix-label {
+        padding: 8px;
+        color: #888;
+        font-weight: 600;
+        text-align: right;
+      }
+
+      .accuracy-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 8px;
+      }
+      .accuracy-badge.high {
+        background: rgba(40, 167, 69, 0.3);
+        color: #51cf66;
+      }
+      .accuracy-badge.medium {
+        background: rgba(255, 193, 7, 0.3);
+        color: #ffd43b;
+      }
+      .accuracy-badge.low {
+        background: rgba(220, 53, 69, 0.3);
+        color: #ff6b6b;
+      }
+
+      .query-list {
+        margin-top: 16px;
+      }
+      .query-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border-left: 4px solid transparent;
+      }
+      .query-item.completed {
+        border-left-color: #38d9a9;
+      }
+      .query-item.active {
+        border-left-color: #667eea;
+        background: rgba(102, 126, 234, 0.1);
+      }
+      .query-item.pending {
+        border-left-color: #444;
+        opacity: 0.6;
+      }
+      .query-name {
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .query-status {
+        font-size: 12px;
+        color: #888;
+      }
+
+      .outcome-display {
+        display: flex;
+        gap: 16px;
+        margin-top: 8px;
+        font-size: 13px;
+      }
+      .outcome-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .outcome-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      .outcome-dot.tp {
+        background: #51cf66;
+      }
+      .outcome-dot.tn {
+        background: #69db7c;
+      }
+      .outcome-dot.fp {
+        background: #ffd43b;
+      }
+      .outcome-dot.fn {
+        background: #ff6b6b;
+      }
+
+      .error-message {
+        background: rgba(220, 53, 69, 0.2);
+        border: 1px solid rgba(220, 53, 69, 0.5);
+        border-radius: 8px;
+        padding: 16px;
+        color: #ff6b6b;
+        margin-top: 16px;
+      }
+      .experiment-id {
+        font-family: monospace;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+
+      @media (max-width: 768px) {
+        .matrix-container {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>📊 Gravel Measurement System - Confusion Matrices</h1>
+      <h1><span>🧪</span> Gravel Experiment Dashboard</h1>
 
-      <div id="status" class="status idle">Ready to start measurements</div>
-
-      <div class="controls">
-        <div>
-          <label for="numTests">Number of Tests:</label>
-          <input type="number" id="numTests" value="100" min="1" max="10000" />
-        </div>
-        <button class="btn" id="startBtn" onclick="startMeasurements()">
-          ▶️ Start Measurements
-        </button>
-        <button
-          class="btn danger"
-          id="stopBtn"
-          onclick="stopMeasurements()"
-          disabled
+      <div class="card">
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+          "
         >
-          ⏹️ Stop
-        </button>
-        <button class="btn warning" onclick="resetMeasurements()">
-          🔄 Reset Statistics
-        </button>
-        <button class="btn secondary" onclick="regenerateDatabase()">
-          🗄️ Regenerate DB
-        </button>
-      </div>
-
-      <div id="progressInfo" class="progress-info" style="display: none">
-        <h3>Measurement Progress</h3>
-        <div class="stat-row">
-          <span class="stat-label">Tests Completed:</span>
-          <span class="stat-value" id="testsCompleted">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Tests Remaining:</span>
-          <span class="stat-value" id="testsRemaining">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Current Operation:</span>
-          <span class="stat-value" id="currentOp">-</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Last Cycle Time:</span>
-          <span class="stat-value" id="lastCycleTime">-</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Average Cycle Time:</span>
-          <span class="stat-value" id="avgCycleTime">-</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Estimated Time Remaining:</span>
-          <span class="stat-value" id="estimatedTimeRemaining">-</span>
-        </div>
-      </div>
-
-      <h2>Total Bytes Transferred (Excluding Noop)</h2>
-
-      <div class="bytes-metrics">
-        <div class="bytes-card">
-          <h3>🟢 Gravel System</h3>
-          <div class="bytes-value" id="gravelBytesValue">0</div>
-          <div class="bytes-label">Total Bytes</div>
-        </div>
-        <div class="bytes-card">
-          <h3>🟠 Old Watch Query</h3>
-          <div class="bytes-value" id="oldWatchQueryBytesValue">0</div>
-          <div class="bytes-label">Total Bytes</div>
-        </div>
-      </div>
-
-      <h2>Confusion Matrices</h2>
-
-      <div class="metrics-grid">
-        <!-- Gravel Confusion Matrix -->
-        <div class="confusion-matrix-section">
-          <h3>🟢 Gravel System</h3>
-          <div class="confusion-matrix">
-            <!-- Corner -->
-            <div class="matrix-cell matrix-corner">
-              Predicted →<br />Actual ↓
+          <div>
+            <div id="statusBadge" class="status-badge idle">
+              <span id="statusIcon">⏸️</span>
+              <span id="statusText">Idle</span>
             </div>
-            <!-- Top Headers -->
-            <div class="matrix-cell matrix-header">Changed</div>
-            <div class="matrix-cell matrix-header">No Change</div>
-
-            <!-- Row 1: Actual Changed -->
-            <div class="matrix-cell matrix-label">Changed</div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">True Positive</div>
-              <div class="value" id="gravelTP">0</div>
-            </div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">False Negative</div>
-              <div class="value" id="gravelFN">0</div>
-            </div>
-
-            <!-- Row 2: Actual No Change -->
-            <div class="matrix-cell matrix-label">No Change</div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">False Positive</div>
-              <div class="value" id="gravelFP">0</div>
-            </div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">True Negative</div>
-              <div class="value" id="gravelTN">0</div>
-            </div>
+            <div
+              id="phaseText"
+              style="font-size: 13px; color: #888; margin-top: 8px"
+            ></div>
           </div>
+          <div
+            id="experimentId"
+            class="experiment-id"
+            style="display: none"
+          ></div>
+        </div>
 
-          <div class="stats-summary">
-            <h4>Performance Metrics</h4>
-            <div class="stat-row">
-              <span class="stat-label">Accuracy:</span>
-              <span class="stat-value" id="gravelAccuracy">-</span>
-            </div>
+        <div
+          style="
+            margin-top: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+          "
+        >
+          <div class="stat-item">
+            <div class="stat-value" id="displaySeed">-</div>
+            <div class="stat-label">Seed</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="displayUpdates">-</div>
+            <div class="stat-label">Updates/Query</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="displayReps">-</div>
+            <div class="stat-label">Repetitions</div>
           </div>
         </div>
 
-        <!-- Old WatchQuery Confusion Matrix -->
-        <div class="confusion-matrix-section">
-          <h3>🔵 Old WatchQuery System</h3>
-          <div class="confusion-matrix">
-            <!-- Corner -->
-            <div class="matrix-cell matrix-corner">
-              Predicted →<br />Actual ↓
-            </div>
-            <!-- Top Headers -->
-            <div class="matrix-cell matrix-header">Changed</div>
-            <div class="matrix-cell matrix-header">No Change</div>
+        <div style="margin-top: 20px; display: flex; gap: 12px">
+          <button class="btn" id="startBtn" onclick="startExperiment()">
+            ▶️ Start Experiment
+          </button>
+          <button
+            class="btn btn-stop"
+            id="stopBtn"
+            onclick="stopExperiment()"
+            style="display: none"
+          >
+            ⏹️ Stop Experiment
+          </button>
+        </div>
 
-            <!-- Row 1: Actual Changed -->
-            <div class="matrix-cell matrix-label">Changed</div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">True Positive</div>
-              <div class="value" id="oldWatchQueryTP">0</div>
-            </div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">False Negative</div>
-              <div class="value" id="oldWatchQueryFN">0</div>
-            </div>
+        <div
+          id="errorMessage"
+          class="error-message"
+          style="display: none"
+        ></div>
+      </div>
 
-            <!-- Row 2: Actual No Change -->
-            <div class="matrix-cell matrix-label">No Change</div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">False Positive</div>
-              <div class="value" id="oldWatchQueryFP">0</div>
-            </div>
-            <div class="matrix-cell matrix-value">
-              <div class="label">True Negative</div>
-              <div class="value" id="oldWatchQueryTN">0</div>
-            </div>
+      <div id="progressCard" class="card" style="display: none">
+        <h2 style="margin-top: 0">Progress</h2>
+
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 4px;
+          "
+        >
+          <span
+            >Query <span id="currentQueryNum">0</span>/<span id="totalQueries"
+              >0</span
+            >
+            | Rep <span id="currentRep">0</span>/<span id="totalReps"
+              >0</span
+            ></span
+          >
+          <span id="queryName">-</span>
+        </div>
+        <div class="progress-bar-container">
+          <div id="progressBar" class="progress-bar" style="width: 0%">0%</div>
+        </div>
+
+        <div style="font-size: 13px; margin-bottom: 4px; text-align: center">
+          <span
+            >Last: <span id="lastOpType">-</span> → Gravel:
+            <span id="lastGravelOutcome">-</span> | Old:
+            <span id="lastOldOutcome">-</span></span
+          >
+        </div>
+        <div class="progress-bar-container">
+          <div id="updateProgressBar" class="progress-bar" style="width: 0%">
+            0%
           </div>
+        </div>
 
-          <div class="stats-summary">
-            <h4>Performance Metrics</h4>
-            <div class="stat-row">
-              <span class="stat-label">Accuracy:</span>
-              <span class="stat-value" id="oldWatchQueryAccuracy">-</span>
-            </div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="elapsedTime">0:00</div>
+            <div class="stat-label">Elapsed</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="estimatedTime">--:--</div>
+            <div class="stat-label">Est. Remaining</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="updatesPerSec">0</div>
+            <div class="stat-label">Updates/sec</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="completedQueries">0</div>
+            <div class="stat-label">Queries Done</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="gravelLatency">-</div>
+            <div class="stat-label">Gravel Latency</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="oldLatency">-</div>
+            <div class="stat-label">Old Latency</div>
           </div>
         </div>
       </div>
 
-      <h2>Measurement Log</h2>
-      <div class="log-section" id="logSection">
-        <div class="log-entry info">Waiting to start measurements...</div>
+      <div id="matrixCard" class="card" style="display: none">
+        <h2 style="margin-top: 0">Confusion Matrices (All Queries)</h2>
+        <div class="matrix-container">
+          <div class="matrix-box">
+            <div class="matrix-title">🚀 Gravel</div>
+            <div class="matrix-grid">
+              <div></div>
+              <div class="matrix-header">Predicted +</div>
+              <div class="matrix-header">Predicted -</div>
+              <div class="matrix-label">Actual +</div>
+              <div class="matrix-cell tp" id="gravelTP">0</div>
+              <div class="matrix-cell fn" id="gravelFN">0</div>
+              <div class="matrix-label">Actual -</div>
+              <div class="matrix-cell fp" id="gravelFP">0</div>
+              <div class="matrix-cell tn" id="gravelTN">0</div>
+            </div>
+            <div class="accuracy-badge high" id="gravelAccuracy">
+              Accuracy: 0%
+            </div>
+          </div>
+          <div class="matrix-box">
+            <div class="matrix-title">📡 OldWatchQuery</div>
+            <div class="matrix-grid">
+              <div></div>
+              <div class="matrix-header">Predicted +</div>
+              <div class="matrix-header">Predicted -</div>
+              <div class="matrix-label">Actual +</div>
+              <div class="matrix-cell tp" id="oldTP">0</div>
+              <div class="matrix-cell fn" id="oldFN">0</div>
+              <div class="matrix-label">Actual -</div>
+              <div class="matrix-cell fp" id="oldFP">0</div>
+              <div class="matrix-cell tn" id="oldTN">0</div>
+            </div>
+            <div class="accuracy-badge high" id="oldAccuracy">Accuracy: 0%</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="latencyGraphCard" class="card" style="display: none">
+        <h2 style="margin-top: 0">Latency Over Time</h2>
+        <canvas id="latencyChart" style="max-height: 300px"></canvas>
+      </div>
+
+      <div id="queriesCard" class="card" style="display: none">
+        <h2 style="margin-top: 0">Completed Queries</h2>
+        <div id="queryList" class="query-list"></div>
       </div>
     </div>
 
     <script>
-      let isRunning = false;
-      let shouldStop = false;
-      let testsCompleted = 0;
-      let totalTests = 0;
-      let cycleTimes = [];
-      let lastCycleTime = 0;
+      let pollInterval = null;
+      let latencyChart = null;
 
-      // Bytes metrics
-      let gravelBytes = 0;
-      let oldWatchQueryBytes = 0;
-
-      // Deep equality comparison for objects (ignores property order)
-      function deepEqual(obj1, obj2, path = "") {
-        // Handle strict equality (primitives, same reference)
-        if (obj1 === obj2) return true;
-
-        // Handle null/undefined
-        if (obj1 == null || obj2 == null) {
-          if (obj1 !== obj2) {
-            console.log(
-              `[deepEqual] Null/undefined mismatch at ${path}:`,
-              obj1,
-              "vs",
-              obj2,
-            );
-          }
-          return false;
-        }
-
-        // Handle Date objects
-        if (obj1 instanceof Date && obj2 instanceof Date) {
-          const equal = obj1.getTime() === obj2.getTime();
-          if (!equal) {
-            console.log(
-              `[deepEqual] Date mismatch at ${path}:`,
-              obj1,
-              "vs",
-              obj2,
-            );
-          }
-          return equal;
-        }
-
-        // Handle primitives
-        if (typeof obj1 !== "object" || typeof obj2 !== "object") {
-          // Special case: Compare ISO date strings by parsing them
-          if (typeof obj1 === "string" && typeof obj2 === "string") {
-            // Check if both look like ISO date strings
-            const isoDateRegex =
-              /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z?$/;
-            if (isoDateRegex.test(obj1) && isoDateRegex.test(obj2)) {
-              const date1 = new Date(obj1);
-              const date2 = new Date(obj2);
-              // Only compare as dates if both are valid dates
-              if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
-                const equal = date1.getTime() === date2.getTime();
-                if (!equal) {
-                  console.log(
-                    `[deepEqual] Date string mismatch at ${path}:`,
-                    obj1,
-                    "vs",
-                    obj2,
-                    "(timestamps:",
-                    date1.getTime(),
-                    "vs",
-                    date2.getTime(),
-                    ")",
-                  );
-                }
-                return equal;
-              }
-            }
-          }
-
-          const equal = obj1 === obj2;
-          if (!equal) {
-            console.log(
-              `[deepEqual] Primitive mismatch at ${path}:`,
-              obj1,
-              "vs",
-              obj2,
-            );
-          }
-          return equal;
-        }
-
-        // Handle arrays
-        if (Array.isArray(obj1) && Array.isArray(obj2)) {
-          if (obj1.length !== obj2.length) {
-            console.log(
-              `[deepEqual] Array length mismatch at ${path}:`,
-              obj1.length,
-              "vs",
-              obj2.length,
-            );
-            return false;
-          }
-
-          // Recursively compare each element (handles nested objects, arrays, dates)
-          for (let i = 0; i < obj1.length; i++) {
-            if (!deepEqual(obj1[i], obj2[i], `${path}[${i}]`)) {
-              console.log(
-                `[deepEqual] Array element mismatch at ${path}[${i}]`,
-              );
-              return false;
-            }
-          }
-          return true;
-        }
-
-        // One is array, other is not
-        if (Array.isArray(obj1) !== Array.isArray(obj2)) {
-          console.log(
-            `[deepEqual] Type mismatch at ${path}: one is array, other is not`,
-          );
-          return false;
-        }
-
-        // Compare objects property by property (order-independent)
-        const keys1 = Object.keys(obj1).sort();
-        const keys2 = Object.keys(obj2).sort();
-
-        // Different number of properties
-        if (keys1.length !== keys2.length) {
-          console.log(
-            `[deepEqual] Object keys count mismatch at ${path}:`,
-            keys1.length,
-            "vs",
-            keys2.length,
-          );
-          console.log(`[deepEqual] Keys1:`, keys1);
-          console.log(`[deepEqual] Keys2:`, keys2);
-          return false;
-        }
-
-        // Check all keys match
-        for (let i = 0; i < keys1.length; i++) {
-          if (keys1[i] !== keys2[i]) {
-            console.log(
-              `[deepEqual] Key mismatch at ${path}:`,
-              keys1[i],
-              "vs",
-              keys2[i],
-            );
-            console.log(`[deepEqual] All keys1:`, keys1);
-            console.log(`[deepEqual] All keys2:`, keys2);
-            return false;
-          }
-        }
-
-        // Recursively compare all property values
-        for (const key of keys1) {
-          if (!deepEqual(obj1[key], obj2[key], `${path}.${key}`)) {
-            console.log(
-              `[deepEqual] Property value mismatch at ${path}.${key}`,
-            );
-            return false;
-          }
-        }
-
-        return true;
-      }
-
-      // Helper function to compare arrays for equality
-      function arraysEqual(a, b) {
-        if (!Array.isArray(a) || !Array.isArray(b)) return false;
-        if (a.length !== b.length) return false;
-
-        // Sort both arrays by _id for comparison
-        const sortedA = [...a].sort((x, y) =>
-          String(x._id).localeCompare(String(y._id)),
-        );
-        const sortedB = [...b].sort((x, y) =>
-          String(x._id).localeCompare(String(y._id)),
-        );
-
-        // Use deep equality instead of JSON.stringify to handle property order differences
-        for (let i = 0; i < sortedA.length; i++) {
-          if (!deepEqual(sortedA[i], sortedB[i])) {
-            return false;
-          }
-        }
-
-        return true;
-      }
-
-      // Add log entry
-      function addLog(message, type = "info") {
-        const logSection = document.getElementById("logSection");
-        const entry = document.createElement("div");
-        entry.className = `log-entry ${type}`;
-        const timestamp = new Date().toLocaleTimeString();
-        entry.textContent = `[${timestamp}] ${message}`;
-        logSection.insertBefore(entry, logSection.firstChild);
-
-        // Keep only last 100 entries
-        while (logSection.children.length > 100) {
-          logSection.removeChild(logSection.lastChild);
-        }
-      }
-
-      // Update UI with current statistics
-      async function updateStatistics() {
-        try {
-          const response = await fetch("/measurements");
-          const data = await response.json();
-
-          // Update Gravel matrix
-          document.getElementById("gravelTP").textContent =
-            data.gravel.truePositive;
-          document.getElementById("gravelTN").textContent =
-            data.gravel.trueNegative;
-          document.getElementById("gravelFP").textContent =
-            data.gravel.falsePositive;
-          document.getElementById("gravelFN").textContent =
-            data.gravel.falseNegative;
-
-          // Update OldWatchQuery matrix
-          document.getElementById("oldWatchQueryTP").textContent =
-            data.oldWatchQuery.truePositive;
-          document.getElementById("oldWatchQueryTN").textContent =
-            data.oldWatchQuery.trueNegative;
-          document.getElementById("oldWatchQueryFP").textContent =
-            data.oldWatchQuery.falsePositive;
-          document.getElementById("oldWatchQueryFN").textContent =
-            data.oldWatchQuery.falseNegative;
-
-          // Calculate and update metrics for Gravel
-          const gravelTotal =
-            data.gravel.truePositive +
-            data.gravel.trueNegative +
-            data.gravel.falsePositive +
-            data.gravel.falseNegative;
-          if (gravelTotal > 0) {
-            const gravelAcc = (
-              ((data.gravel.truePositive + data.gravel.trueNegative) /
-                gravelTotal) *
-              100
-            ).toFixed(2);
-            document.getElementById("gravelAccuracy").textContent =
-              gravelAcc + "%";
-          }
-
-          // Calculate and update metrics for OldWatchQuery
-          const owqTotal =
-            data.oldWatchQuery.truePositive +
-            data.oldWatchQuery.trueNegative +
-            data.oldWatchQuery.falsePositive +
-            data.oldWatchQuery.falseNegative;
-          if (owqTotal > 0) {
-            const owqAcc = (
-              ((data.oldWatchQuery.truePositive +
-                data.oldWatchQuery.trueNegative) /
-                owqTotal) *
-              100
-            ).toFixed(2);
-            document.getElementById("oldWatchQueryAccuracy").textContent =
-              owqAcc + "%";
-          }
-
-          testsCompleted = data.totalTests;
-          document.getElementById("testsCompleted").textContent =
-            testsCompleted;
-        } catch (error) {
-          addLog("Error updating statistics: " + error.message, "error");
-        }
-      }
-
-      // Format milliseconds to human readable time
       function formatTime(ms) {
-        if (ms < 1000) return `${Math.round(ms)}ms`;
-        const seconds = ms / 1000;
-        if (seconds < 60) return `${seconds.toFixed(1)}s`;
+        if (ms < 0 || !isFinite(ms)) return "--:--";
+        const seconds = Math.floor(ms / 1000);
         const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = Math.round(seconds % 60);
-        return `${minutes}m ${remainingSeconds}s`;
+        const hours = Math.floor(minutes / 60);
+        if (hours > 0)
+          return `${hours}:${String(minutes % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+        return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
       }
 
-      function formatBytes(bytes) {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
-        if (bytes < 1024 * 1024 * 1024)
-          return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+      function calculateAccuracy(matrix) {
+        const total =
+          matrix.truePositive +
+          matrix.trueNegative +
+          matrix.falsePositive +
+          matrix.falseNegative;
+        return total > 0
+          ? ((matrix.truePositive + matrix.trueNegative) / total) * 100
+          : 0;
       }
 
-      async function updateBytesMetrics() {
-        try {
-          const response = await fetch("/metrics");
-          if (!response.ok) {
-            console.error("Failed to fetch metrics:", response.status);
-            return;
-          }
+      function getAccuracyClass(accuracy) {
+        if (accuracy >= 90) return "high";
+        if (accuracy >= 70) return "medium";
+        return "low";
+      }
 
-          const metrics = await response.json();
-          gravelBytes = metrics.gravelBytes || 0;
-          oldWatchQueryBytes = metrics.oldWatchQueryBytes || 0;
+      function updateUI(state) {
+        const statusBadge = document.getElementById("statusBadge");
+        const statusIcon = document.getElementById("statusIcon");
+        const statusText = document.getElementById("statusText");
+        const phaseText = document.getElementById("phaseText");
+        const experimentIdEl = document.getElementById("experimentId");
+        const startBtn = document.getElementById("startBtn");
+        const progressCard = document.getElementById("progressCard");
+        const matrixCard = document.getElementById("matrixCard");
+        const queriesCard = document.getElementById("queriesCard");
+        const errorMessage = document.getElementById("errorMessage");
 
-          document.getElementById("gravelBytesValue").textContent =
-            formatBytes(gravelBytes);
-          document.getElementById("oldWatchQueryBytesValue").textContent =
-            formatBytes(oldWatchQueryBytes);
-        } catch (error) {
-          console.error("Error updating bytes metrics:", error);
+        // Update status badge
+        statusBadge.className = "status-badge";
+        if (state.error) {
+          statusBadge.classList.add("error");
+          statusIcon.textContent = "❌";
+          statusText.textContent = "Error";
+          errorMessage.textContent = state.error;
+          errorMessage.style.display = "block";
+        } else if (state.phase === "complete") {
+          statusBadge.classList.add("complete");
+          statusIcon.textContent = "✅";
+          statusText.textContent = "Complete";
+          errorMessage.style.display = "none";
+        } else if (state.phase === "regenerating_db") {
+          statusBadge.classList.add("regenerating");
+          statusIcon.textContent = "🔄";
+          statusText.textContent = "Regenerating DB";
+          errorMessage.style.display = "none";
+        } else if (state.running) {
+          statusBadge.classList.add("running");
+          statusIcon.textContent = "▶️";
+          statusText.textContent = "Running";
+          errorMessage.style.display = "none";
+        } else {
+          statusBadge.classList.add("idle");
+          statusIcon.textContent = "⏸️";
+          statusText.textContent = "Idle";
+          errorMessage.style.display = "none";
         }
-      }
 
-      // Update timing display
-      function updateTimingDisplay() {
-        // Display last cycle time
-        if (lastCycleTime > 0) {
-          document.getElementById("lastCycleTime").textContent =
-            formatTime(lastCycleTime);
+        // Phase text
+        const phaseLabels = {
+          idle: "",
+          regenerating_db: "Regenerating database...",
+          starting_watchers: "Starting watchers...",
+          running_updates: "Running updates...",
+          complete: "Experiment complete!",
+        };
+        phaseText.textContent = phaseLabels[state.phase] || state.phase;
+
+        // Experiment ID
+        if (state.experimentId) {
+          experimentIdEl.textContent = state.experimentId;
+          experimentIdEl.style.display = "inline-block";
+        } else {
+          experimentIdEl.style.display = "none";
         }
 
-        // Calculate and display average cycle time
-        if (cycleTimes.length > 0) {
-          const avg = cycleTimes.reduce((a, b) => a + b, 0) / cycleTimes.length;
-          document.getElementById("avgCycleTime").textContent = formatTime(avg);
+        // Update parameter displays
+        document.getElementById("displaySeed").textContent = state.seed || "-";
+        document.getElementById("displayUpdates").textContent =
+          state.updatesPerQuery || "-";
+        document.getElementById("displayReps").textContent =
+          state.repetitionsPerQuery || "-";
+
+        startBtn.disabled = state.running;
+
+        // Toggle button visibility
+        const stopBtn = document.getElementById("stopBtn");
+        if (state.running) {
+          startBtn.style.display = "none";
+          stopBtn.style.display = "inline-block";
+          stopBtn.disabled = false;
+        } else {
+          startBtn.style.display = "inline-block";
+          stopBtn.style.display = "none";
+        }
+
+        // Progress card
+        if (state.running || state.phase === "complete") {
+          progressCard.style.display = "block";
+          matrixCard.style.display = "block";
+          queriesCard.style.display = "block";
+
+          // Progress info
+          document.getElementById("currentQueryNum").textContent =
+            state.currentQueryIndex + 1;
+          document.getElementById("totalQueries").textContent =
+            state.totalQueries;
+          document.getElementById("currentRep").textContent =
+            state.currentRepetition;
+          document.getElementById("totalReps").textContent =
+            state.repetitionsPerQuery;
+          document.getElementById("queryName").textContent =
+            state.currentQueryName || "-";
+
+          // Overall progress
+          const totalWork =
+            state.totalQueries *
+            state.repetitionsPerQuery *
+            state.updatesPerQuery;
+          const completedWork =
+            state.completedQueries.length *
+              state.repetitionsPerQuery *
+              state.updatesPerQuery +
+            (state.currentRepetition - 1) * state.updatesPerQuery +
+            state.currentUpdateNumber;
+          const overallProgress =
+            totalWork > 0 ? (completedWork / totalWork) * 100 : 0;
+          const progressBar = document.getElementById("progressBar");
+          progressBar.style.width = `${Math.min(100, overallProgress)}%`;
+          progressBar.textContent = `${Math.round(overallProgress)}%`;
+
+          // Update progress
+          document.getElementById("lastOpType").textContent =
+            state.lastOperationType || "-";
+          document.getElementById("lastGravelOutcome").textContent =
+            state.lastGravelOutcome || "-";
+          document.getElementById("lastOldOutcome").textContent =
+            state.lastOldWatchQueryOutcome || "-";
+
+          const updateProgress =
+            state.updatesPerQuery > 0
+              ? (state.currentUpdateNumber / state.updatesPerQuery) * 100
+              : 0;
+          const updateBar = document.getElementById("updateProgressBar");
+          updateBar.style.width = `${Math.min(100, updateProgress)}%`;
+          updateBar.textContent = `${Math.round(updateProgress)}%`;
+
+          // Time stats
+          const elapsed = state.startTime ? Date.now() - state.startTime : 0;
+          document.getElementById("elapsedTime").textContent =
+            formatTime(elapsed);
 
           // Calculate estimated time remaining
-          const remaining = totalTests - testsCompleted;
-          if (remaining > 0) {
-            const estimatedMs = avg * remaining;
-            document.getElementById("estimatedTimeRemaining").textContent =
-              formatTime(estimatedMs);
+          if (elapsed > 0 && completedWork > 0 && totalWork > completedWork) {
+            const updatesPerSec = completedWork / (elapsed / 1000);
+            document.getElementById("updatesPerSec").textContent =
+              updatesPerSec.toFixed(1);
+
+            const remainingWork = totalWork - completedWork;
+            const estimatedRemainingMs = (remainingWork / updatesPerSec) * 1000;
+            document.getElementById("estimatedTime").textContent =
+              formatTime(estimatedRemainingMs);
+          } else if (state.phase === "complete") {
+            document.getElementById("estimatedTime").textContent = "0:00";
+            if (elapsed > 0 && completedWork > 0) {
+              const updatesPerSec = (completedWork / (elapsed / 1000)).toFixed(
+                1,
+              );
+              document.getElementById("updatesPerSec").textContent =
+                updatesPerSec;
+            }
           } else {
-            document.getElementById("estimatedTimeRemaining").textContent =
-              "0s";
+            document.getElementById("estimatedTime").textContent = "--:--";
+            document.getElementById("updatesPerSec").textContent = "0";
           }
+
+          document.getElementById("completedQueries").textContent =
+            state.completedQueries.length;
+
+          // Display latencies
+          document.getElementById("gravelLatency").textContent =
+            `${state.lastGravelLatencyMs}ms`;
+          document.getElementById("oldLatency").textContent =
+            `${state.lastOldWatchQueryLatencyMs}ms`;
+
+          // Use server-provided aggregated matrices (arrays: [TP, TN, FP, FN])
+          const gravelMatrix = state.aggregatedGravelMatrix || [0, 0, 0, 0];
+          const oldMatrix = state.aggregatedOldWatchQueryMatrix || [0, 0, 0, 0];
+
+          // Display aggregated matrices
+          document.getElementById("gravelTP").textContent = gravelMatrix[0];
+          document.getElementById("gravelTN").textContent = gravelMatrix[1];
+          document.getElementById("gravelFP").textContent = gravelMatrix[2];
+          document.getElementById("gravelFN").textContent = gravelMatrix[3];
+          const gravelTotal =
+            gravelMatrix[0] +
+            gravelMatrix[1] +
+            gravelMatrix[2] +
+            gravelMatrix[3];
+          const gravelAcc =
+            gravelTotal > 0
+              ? ((gravelMatrix[0] + gravelMatrix[1]) / gravelTotal) * 100
+              : 0;
+          const gravelAccEl = document.getElementById("gravelAccuracy");
+          gravelAccEl.textContent = `Accuracy: ${gravelAcc.toFixed(1)}%`;
+          gravelAccEl.className = `accuracy-badge ${getAccuracyClass(gravelAcc)}`;
+
+          document.getElementById("oldTP").textContent = oldMatrix[0];
+          document.getElementById("oldTN").textContent = oldMatrix[1];
+          document.getElementById("oldFP").textContent = oldMatrix[2];
+          document.getElementById("oldFN").textContent = oldMatrix[3];
+          const oldTotal =
+            oldMatrix[0] + oldMatrix[1] + oldMatrix[2] + oldMatrix[3];
+          const oldAcc =
+            oldTotal > 0 ? ((oldMatrix[0] + oldMatrix[1]) / oldTotal) * 100 : 0;
+          const oldAccEl = document.getElementById("oldAccuracy");
+          oldAccEl.textContent = `Accuracy: ${oldAcc.toFixed(1)}%`;
+          oldAccEl.className = `accuracy-badge ${getAccuracyClass(oldAcc)}`;
+
+          // Update latency graph
+          updateLatencyGraph(state);
+
+          // Query list
+          updateQueryList(state);
+        } else {
+          progressCard.style.display = "none";
+          matrixCard.style.display = "none";
+          queriesCard.style.display = "none";
+          document.getElementById("latencyGraphCard").style.display = "none";
         }
       }
 
-      // Perform a single measurement
-      async function performSingleMeasurement() {
-        const startTime = performance.now();
-        try {
-          // 1. Get baseline from simplequery (source of truth)
-          const baselineResponse = await fetch("/simplequery");
-          const baselineData = await baselineResponse.json();
-          const baseline = baselineData.result;
+      function updateLatencyGraph(state) {
+        const latencyGraphCard = document.getElementById("latencyGraphCard");
 
-          // 2. Perform random update
-          const updateResponse = await fetch("/randomupdate", {
-            method: "POST",
+        if (!state.running || state.latencyHistory.length === 0) {
+          latencyGraphCard.style.display = "none";
+          return;
+        }
+
+        latencyGraphCard.style.display = "block";
+
+        const ctx = document.getElementById("latencyChart");
+
+        if (!latencyChart) {
+          latencyChart = new Chart(ctx, {
+            type: "line",
+            data: {
+              labels: [],
+              datasets: [
+                {
+                  label: "Gravel Latency",
+                  data: [],
+                  borderColor: "#51cf66",
+                  backgroundColor: "rgba(81, 207, 102, 0.1)",
+                  borderWidth: 2,
+                  tension: 0.1,
+                  pointRadius: 2,
+                  pointHoverRadius: 4,
+                },
+                {
+                  label: "OldWatchQuery Latency",
+                  data: [],
+                  borderColor: "#ffd43b",
+                  backgroundColor: "rgba(255, 212, 59, 0.1)",
+                  borderWidth: 2,
+                  tension: 0.1,
+                  pointRadius: 2,
+                  pointHoverRadius: 4,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: {
+                  title: {
+                    display: true,
+                    text: "Update Number",
+                    color: "#888",
+                  },
+                  ticks: { color: "#888" },
+                  grid: { color: "rgba(255, 255, 255, 0.1)" },
+                },
+                y: {
+                  title: {
+                    display: true,
+                    text: "Latency (ms)",
+                    color: "#888",
+                  },
+                  ticks: { color: "#888" },
+                  grid: { color: "rgba(255, 255, 255, 0.1)" },
+                  beginAtZero: true,
+                },
+              },
+              plugins: {
+                legend: {
+                  labels: { color: "#e0e0e0" },
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function (context) {
+                      return (
+                        context.dataset.label + ": " + context.parsed.y + "ms"
+                      );
+                    },
+                  },
+                },
+              },
+            },
           });
-          const updateData = await updateResponse.json();
+        }
 
-          document.getElementById("currentOp").textContent =
-            updateData.operationType || "unknown";
+        // Update chart data
+        latencyChart.data.labels = state.latencyHistory.map(
+          (d) => d.updateNumber,
+        );
+        latencyChart.data.datasets[0].data = state.latencyHistory.map(
+          (d) => d.gravelLatencyMs,
+        );
+        latencyChart.data.datasets[1].data = state.latencyHistory.map(
+          (d) => d.oldWatchQueryLatencyMs,
+        );
+        latencyChart.update("none");
+      }
 
-          // 3. /randomupdate now waits for Gravel internally (via noop messages)
-          // No need for /settled endpoint anymore!
+      function updateQueryList(state) {
+        const queryList = document.getElementById("queryList");
+        let html = "";
 
-          // 4. Get new state from all three sources
-          const [newSimpleResponse, gravelResponse, oldWatchQueryResponse] =
-            await Promise.all([
-              fetch("/simplequery"),
-              fetch("/data"),
-              fetch("/oldwatchquery"),
-            ]);
+        for (const q of state.completedQueries) {
+          // Matrices are arrays: [TP, TN, FP, FN]
+          const gravelTotal =
+            q.gravelMatrix[0] +
+            q.gravelMatrix[1] +
+            q.gravelMatrix[2] +
+            q.gravelMatrix[3];
+          const gravelAcc =
+            gravelTotal > 0
+              ? ((q.gravelMatrix[0] + q.gravelMatrix[1]) / gravelTotal) * 100
+              : 0;
+          const oldTotal =
+            q.oldWatchQueryMatrix[0] +
+            q.oldWatchQueryMatrix[1] +
+            q.oldWatchQueryMatrix[2] +
+            q.oldWatchQueryMatrix[3];
+          const oldAcc =
+            oldTotal > 0
+              ? ((q.oldWatchQueryMatrix[0] + q.oldWatchQueryMatrix[1]) /
+                  oldTotal) *
+                100
+              : 0;
 
-          const newSimpleData = await newSimpleResponse.json();
-          const newSimple = newSimpleData.result;
-          const gravelData = await gravelResponse.json();
-          const oldWatchQueryData = await oldWatchQueryResponse.json();
+          html += `
+            <div class="query-item completed" style="display: block; padding: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div>
+                  <div class="query-name">${q.queryName}</div>
+                  <div class="query-status">Completed in ${(q.durationMs / 1000).toFixed(1)}s</div>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+                <div>
+                  <div style="font-weight: 600; color: #51cf66; margin-bottom: 8px;">🚀 Gravel</div>
+                  <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px; font-size: 12px;">
+                    <div></div>
+                    <div style="text-align: center; color: #888;">Pred +</div>
+                    <div style="text-align: center; color: #888;">Pred -</div>
+                    <div style="text-align: right; color: #888; padding-right: 8px;">Act +</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(81, 207, 102, 0.2); border-radius: 4px;">${q.gravelMatrix[0]}</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(220, 53, 69, 0.2); border-radius: 4px;">${q.gravelMatrix[3]}</div>
+                    <div style="text-align: right; color: #888; padding-right: 8px;">Act -</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(255, 193, 7, 0.2); border-radius: 4px;">${q.gravelMatrix[2]}</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(81, 207, 102, 0.2); border-radius: 4px;">${q.gravelMatrix[1]}</div>
+                  </div>
+                  <div style="margin-top: 8px; font-size: 13px; color: #51cf66;">Accuracy: ${gravelAcc.toFixed(1)}%</div>
+                </div>
+                <div>
+                  <div style="font-weight: 600; color: #ffd43b; margin-bottom: 8px;">📡 OldWatchQuery</div>
+                  <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px; font-size: 12px;">
+                    <div></div>
+                    <div style="text-align: center; color: #888;">Pred +</div>
+                    <div style="text-align: center; color: #888;">Pred -</div>
+                    <div style="text-align: right; color: #888; padding-right: 8px;">Act +</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(81, 207, 102, 0.2); border-radius: 4px;">${q.oldWatchQueryMatrix[0]}</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(220, 53, 69, 0.2); border-radius: 4px;">${q.oldWatchQueryMatrix[3]}</div>
+                    <div style="text-align: right; color: #888; padding-right: 8px;">Act -</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(255, 193, 7, 0.2); border-radius: 4px;">${q.oldWatchQueryMatrix[2]}</div>
+                    <div style="text-align: center; padding: 4px; background: rgba(81, 207, 102, 0.2); border-radius: 4px;">${q.oldWatchQueryMatrix[1]}</div>
+                  </div>
+                  <div style="margin-top: 8px; font-size: 13px; color: #ffd43b;">Accuracy: ${oldAcc.toFixed(1)}%</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
 
-          // 5. Determine if simplequery actually changed (source of truth)
-          console.log("=== COMPARISON: Baseline vs New SimpleQuery ===");
-          console.log("Baseline length:", baseline.length);
-          console.log("New SimpleQuery length:", newSimple.length);
-          const simpleQueryChanged = !arraysEqual(baseline, newSimple);
-          console.log("SimpleQuery changed:", simpleQueryChanged);
+        queryList.innerHTML = html;
+      }
 
-          // 6. Determine if Gravel changed
-          console.log("\n=== COMPARISON: Baseline vs Gravel ===");
-          console.log("Baseline length:", baseline.length);
-          console.log("Gravel length:", gravelData.length);
-          console.log("Baseline sample:", baseline[0]);
-          console.log("Gravel sample:", gravelData[0]);
-          const gravelChanged = !arraysEqual(baseline, gravelData);
-          console.log("Gravel changed:", gravelChanged);
+      async function pollState() {
+        try {
+          const response = await fetch("/experiment/state");
+          const state = await response.json();
+          updateUI(state);
 
-          // 7. Determine if OldWatchQuery changed
-          console.log("\n=== COMPARISON: Baseline vs OldWatchQuery ===");
-          console.log("Baseline length:", baseline.length);
-          console.log("OldWatchQuery length:", oldWatchQueryData.length);
-          const oldWatchQueryChanged = !arraysEqual(
-            baseline,
-            oldWatchQueryData,
-          );
-          console.log("OldWatchQuery changed:", oldWatchQueryChanged);
-
-          // 8. Record measurements
-          // For Gravel
-          let gravelOutcome;
-          if (simpleQueryChanged && gravelChanged) {
-            gravelOutcome = "truePositive";
-          } else if (!simpleQueryChanged && !gravelChanged) {
-            gravelOutcome = "trueNegative";
-          } else if (!simpleQueryChanged && gravelChanged) {
-            gravelOutcome = "falsePositive";
-          } else {
-            gravelOutcome = "falseNegative";
+          if (state.phase === "complete" && !state.running) {
+            stopPolling();
           }
+        } catch (error) {
+          console.error("Error polling state:", error);
+        }
+      }
 
-          // For OldWatchQuery
-          let owqOutcome;
-          if (simpleQueryChanged && oldWatchQueryChanged) {
-            owqOutcome = "truePositive";
-          } else if (!simpleQueryChanged && !oldWatchQueryChanged) {
-            owqOutcome = "trueNegative";
-          } else if (!simpleQueryChanged && oldWatchQueryChanged) {
-            owqOutcome = "falsePositive";
-          } else {
-            owqOutcome = "falseNegative";
-          }
+      function startPolling() {
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(pollState, 500);
+        pollState();
+      }
 
-          // Record both measurements in a single request
-          await fetch("/measurements/record", {
+      function stopPolling() {
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+      }
+
+      async function startExperiment() {
+        document.getElementById("startBtn").disabled = true;
+        document.getElementById("startBtn").style.display = "none";
+        document.getElementById("stopBtn").style.display = "inline-block";
+        document.getElementById("errorMessage").style.display = "none";
+
+        try {
+          const response = await fetch("/experiment", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              measurements: [
-                { system: "gravel", outcome: gravelOutcome },
-                { system: "oldWatchQuery", outcome: owqOutcome },
-              ],
-            }),
+            body: JSON.stringify({}),
           });
 
-          // Log the result
-          console.log("\n=== MEASUREMENT RESULT ===");
-          console.log("Operation Type:", updateData.operationType);
-          console.log(
-            "SimpleQuery (Truth):",
-            simpleQueryChanged ? "CHANGED" : "NO CHANGE",
-          );
-          console.log(
-            "Gravel Result:",
-            gravelChanged ? "CHANGED" : "NO CHANGE",
-            "→",
-            gravelOutcome,
-          );
-          console.log(
-            "OldWatchQuery Result:",
-            oldWatchQueryChanged ? "CHANGED" : "NO CHANGE",
-            "→",
-            owqOutcome,
-          );
-          console.log("========================\n");
-
-          // Record cycle time
-          const endTime = performance.now();
-          lastCycleTime = endTime - startTime;
-          cycleTimes.push(lastCycleTime);
-
-          // Keep only last 10 cycle times for rolling average
-          if (cycleTimes.length > 10) {
-            cycleTimes.shift();
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "Failed to start experiment");
           }
 
-          addLog(
-            `Test ${testsCompleted + 1}: ${
-              updateData.operationType
-            } - SimpleQuery: ${
-              simpleQueryChanged ? "Changed" : "No Change"
-            }, Gravel: ${gravelOutcome}, OWQ: ${owqOutcome} (${formatTime(
-              lastCycleTime,
-            )})`,
-            "success",
-          );
-
-          // Update bytes metrics after each measurement
-          await updateBytesMetrics();
-
-          return true;
+          startPolling();
         } catch (error) {
-          addLog("Error in measurement: " + error.message, "error");
-          return false;
+          document.getElementById("errorMessage").textContent = error.message;
+          document.getElementById("errorMessage").style.display = "block";
+          document.getElementById("startBtn").disabled = false;
+          document.getElementById("startBtn").style.display = "inline-block";
+          document.getElementById("stopBtn").style.display = "none";
         }
       }
 
-      // Start measurements
-      async function startMeasurements() {
-        if (isRunning) return;
-
-        isRunning = true;
-        shouldStop = false;
-        totalTests = parseInt(document.getElementById("numTests").value);
-        testsCompleted = 0;
-
-        document.getElementById("startBtn").disabled = true;
-        document.getElementById("stopBtn").disabled = false;
-        document.getElementById("numTests").disabled = true;
-        document.getElementById("progressInfo").style.display = "block";
-        document.getElementById("testsRemaining").textContent = totalTests;
-
-        document.getElementById("status").className = "status running";
-        document.getElementById(
-          "status",
-        ).textContent = `Running measurements: 0 / ${totalTests}`;
-
-        addLog(`Starting ${totalTests} measurements...`, "info");
-
-        for (let i = 0; i < totalTests; i++) {
-          if (shouldStop) {
-            addLog("Measurements stopped by user", "info");
-            break;
-          }
-
-          const success = await performSingleMeasurement();
-
-          if (success) {
-            await updateStatistics();
-            updateTimingDisplay();
-            const remaining = totalTests - testsCompleted;
-            document.getElementById("testsRemaining").textContent = remaining;
-            document.getElementById(
-              "status",
-            ).textContent = `Running measurements: ${testsCompleted} / ${totalTests}`;
-          }
-        }
-
-        isRunning = false;
-        document.getElementById("startBtn").disabled = false;
-        document.getElementById("stopBtn").disabled = true;
-        document.getElementById("numTests").disabled = false;
-        document.getElementById("status").className = "status success";
-        document.getElementById(
-          "status",
-        ).textContent = `Completed ${testsCompleted} measurements`;
-
-        addLog(`Completed ${testsCompleted} measurements`, "success");
-      }
-
-      // Stop measurements
-      function stopMeasurements() {
-        shouldStop = true;
-        document.getElementById("stopBtn").disabled = true;
-        addLog("Stopping measurements...", "info");
-      }
-
-      // Reset measurements
-      async function resetMeasurements() {
-        if (isRunning) {
-          alert("Cannot reset while measurements are running");
-          return;
-        }
-
-        if (!confirm("Are you sure you want to reset all statistics?")) {
-          return;
-        }
-
+      async function stopExperiment() {
         try {
-          await fetch("/measurements/reset", { method: "POST" });
-          await updateStatistics();
-          testsCompleted = 0;
-          cycleTimes = [];
-          lastCycleTime = 0;
-          document.getElementById("testsCompleted").textContent = "0";
-          document.getElementById("lastCycleTime").textContent = "-";
-          document.getElementById("avgCycleTime").textContent = "-";
-          document.getElementById("estimatedTimeRemaining").textContent = "-";
-          document.getElementById("progressInfo").style.display = "none";
-          document.getElementById("status").className = "status idle";
-          document.getElementById("status").textContent =
-            "Ready to start measurements";
-          addLog("Statistics reset", "info");
+          const response = await fetch("/experiment/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "Failed to stop experiment");
+          }
+
+          document.getElementById("stopBtn").disabled = true;
         } catch (error) {
-          addLog("Error resetting statistics: " + error.message, "error");
+          document.getElementById("errorMessage").textContent = error.message;
+          document.getElementById("errorMessage").style.display = "block";
         }
       }
 
-      // Regenerate database
-      async function regenerateDatabase() {
-        if (isRunning) {
-          alert("Cannot regenerate database while measurements are running");
-          return;
-        }
-
-        if (
-          !confirm(
-            "Regenerate database? This will delete all data and stop measurements.",
-          )
-        ) {
-          return;
-        }
-
-        try {
-          document.getElementById("status").className = "status running";
-          document.getElementById("status").textContent =
-            "Regenerating database...";
-          addLog("Starting database regeneration...", "info");
-
-          const response = await fetch("/redodb", { method: "POST" });
-          const result = await response.json();
-
-          document.getElementById("status").className = "status success";
-          document.getElementById("status").textContent =
-            "Database regenerated successfully";
-          addLog("Database regeneration complete", "success");
-        } catch (error) {
-          document.getElementById("status").className = "status error";
-          document.getElementById("status").textContent =
-            "Error regenerating database";
-          addLog("Error regenerating database: " + error.message, "error");
-        }
-      }
-
-      // Initialize on page load
+      // Start polling immediately on page load
       window.addEventListener("DOMContentLoaded", () => {
-        updateStatistics();
-        updateBytesMetrics();
-        addLog("System ready", "info");
+        startPolling();
       });
     </script>
   </body>
