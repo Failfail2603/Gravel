@@ -334,140 +334,208 @@ export function classifyOutcome(
   }
 }
 
-/**
- * Deep comparison of two values with support for unordered object keys and nested structures
- */
-/**
- * Normalize ObjectID to string for comparison
- */
-function normalizeValue(value: any): any {
-  // Handle ObjectID with $oid property
-  if (value && typeof value === "object" && value.$oid) {
-    return value.$oid;
-  }
-  // Handle MongoDB ObjectId instances
-  if (value && typeof value === "object" && value._bsontype === "ObjectId") {
-    return value.toString();
-  }
-  return value;
-}
+function deepEqual(obj1: any, obj2: any, path = "") {
+  // Handle strict equality (primitives, same reference)
+  if (obj1 === obj2) return true;
 
-function deepEqual(a: any, b: any, path: string = "root"): boolean {
-  // Normalize potential ObjectIDs
-  a = normalizeValue(a);
-  b = normalizeValue(b);
-
-  // Handle null and undefined
-  if (a === b) return true;
-  if (a == null || b == null) {
-    console.log(
-      `[deepEqual] Null/undefined mismatch at ${path}: a=${a}, b=${b}`,
-    );
+  // Handle null/undefined
+  if (obj1 == null || obj2 == null) {
+    if (obj1 !== obj2) {
+      console.log(
+        `[deepEqual] Null/undefined mismatch at ${path}:`,
+        obj1,
+        "vs",
+        obj2,
+      );
+    }
     return false;
   }
 
-  // Handle Date objects before type check
-  if (a instanceof Date && b instanceof Date) {
-    const equal = a.getTime() === b.getTime();
+  // Handle Date objects
+  if (obj1 instanceof Date && obj2 instanceof Date) {
+    const equal = obj1.getTime() === obj2.getTime();
     if (!equal) {
-      console.log(
-        `[deepEqual] Date mismatch at ${path}: a=${a.toISOString()}, b=${b.toISOString()}`,
-      );
+      console.log(`[deepEqual] Date mismatch at ${path}:`, obj1, "vs", obj2);
     }
     return equal;
   }
 
-  // Handle Date vs non-Date mismatch
-  if (a instanceof Date || b instanceof Date) {
-    console.log(
-      `[deepEqual] Date type mismatch at ${path}: a instanceof Date=${a instanceof Date}, b instanceof Date=${b instanceof Date}`,
-    );
-    return false;
+  // Handle Date vs string comparison
+  if (obj1 instanceof Date && typeof obj2 === "string") {
+    const date2 = new Date(obj2);
+    if (!isNaN(date2.getTime())) {
+      const equal = obj1.getTime() === date2.getTime();
+      if (!equal) {
+        console.log(
+          `[deepEqual] Date vs string mismatch at ${path}:`,
+          obj1,
+          "vs",
+          obj2,
+        );
+      }
+      return equal;
+    }
   }
 
-  // Type check
-  if (typeof a !== typeof b) {
-    console.log(
-      `[deepEqual] Type mismatch at ${path}: typeof a=${typeof a}, typeof b=${typeof b}`,
-    );
-    return false;
+  if (typeof obj1 === "string" && obj2 instanceof Date) {
+    const date1 = new Date(obj1);
+    if (!isNaN(date1.getTime())) {
+      const equal = date1.getTime() === obj2.getTime();
+      if (!equal) {
+        console.log(
+          `[deepEqual] String vs Date mismatch at ${path}:`,
+          obj1,
+          "vs",
+          obj2,
+        );
+      }
+      return equal;
+    }
   }
 
   // Handle primitives
-  if (typeof a !== "object") {
-    const equal = a === b;
+  if (typeof obj1 !== "object" || typeof obj2 !== "object") {
+    // Special case: Compare ISO date strings by parsing them
+    if (typeof obj1 === "string" && typeof obj2 === "string") {
+      // Check if both look like ISO date strings
+      const isoDateRegex =
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z?$/;
+      if (isoDateRegex.test(obj1) && isoDateRegex.test(obj2)) {
+        const date1 = new Date(obj1);
+        const date2 = new Date(obj2);
+        // Only compare as dates if both are valid dates
+        if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
+          const equal = date1.getTime() === date2.getTime();
+          if (!equal) {
+            console.log(
+              `[deepEqual] Date string mismatch at ${path}:`,
+              obj1,
+              "vs",
+              obj2,
+              "(timestamps:",
+              date1.getTime(),
+              "vs",
+              date2.getTime(),
+              ")",
+            );
+          }
+          return equal;
+        }
+      }
+    }
+
+    const equal = obj1 === obj2;
     if (!equal) {
-      console.log(`[deepEqual] Primitive mismatch at ${path}: a=${a}, b=${b}`);
+      console.log(
+        `[deepEqual] Primitive mismatch at ${path}:`,
+        obj1,
+        "vs",
+        obj2,
+      );
     }
     return equal;
   }
 
   // Handle arrays
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) {
+  if (Array.isArray(obj1) && Array.isArray(obj2)) {
+    if (obj1.length !== obj2.length) {
       console.log(
-        `[deepEqual] Array length mismatch at ${path}: a.length=${a.length}, b.length=${b.length}`,
+        `[deepEqual] Array length mismatch at ${path}:`,
+        obj1.length,
+        "vs",
+        obj2.length,
       );
       return false;
     }
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i], `${path}[${i}]`)) return false;
+
+    // Recursively compare each element (handles nested objects, arrays, dates)
+    for (let i = 0; i < obj1.length; i++) {
+      if (!deepEqual(obj1[i], obj2[i], `${path}[${i}]`)) {
+        console.log(`[deepEqual] Array element mismatch at ${path}[${i}]`);
+        return false;
+      }
     }
     return true;
   }
 
-  // Handle array vs non-array mismatch
-  if (Array.isArray(a) || Array.isArray(b)) {
+  // One is array, other is not
+  if (Array.isArray(obj1) !== Array.isArray(obj2)) {
     console.log(
-      `[deepEqual] Array type mismatch at ${path}: Array.isArray(a)=${Array.isArray(a)}, Array.isArray(b)=${Array.isArray(b)}`,
+      `[deepEqual] Type mismatch at ${path}: one is array, other is not`,
     );
     return false;
   }
 
-  // Handle objects with unordered keys
-  if (typeof a === "object" && typeof b === "object") {
-    const keysA = Object.keys(a).sort();
-    const keysB = Object.keys(b).sort();
+  // Compare objects property by property (order-independent)
+  const keys1 = Object.keys(obj1).sort();
+  const keys2 = Object.keys(obj2).sort();
 
-    if (keysA.length !== keysB.length) {
+  // Different number of properties
+  if (keys1.length !== keys2.length) {
+    console.log(
+      `[deepEqual] Object keys count mismatch at ${path}:`,
+      keys1.length,
+      "vs",
+      keys2.length,
+    );
+    console.log(`[deepEqual] Keys1:`, keys1);
+    console.log(`[deepEqual] Keys2:`, keys2);
+    return false;
+  }
+
+  // Check all keys match
+  for (let i = 0; i < keys1.length; i++) {
+    if (keys1[i] !== keys2[i]) {
       console.log(
-        `[deepEqual] Object key count mismatch at ${path}: keysA.length=${keysA.length}, keysB.length=${keysB.length}`,
+        `[deepEqual] Key mismatch at ${path}:`,
+        keys1[i],
+        "vs",
+        keys2[i],
       );
-      console.log(`[deepEqual] keysA=${JSON.stringify(keysA)}`);
-      console.log(`[deepEqual] keysB=${JSON.stringify(keysB)}`);
+      console.log(`[deepEqual] All keys1:`, keys1);
+      console.log(`[deepEqual] All keys2:`, keys2);
       return false;
     }
-
-    for (let i = 0; i < keysA.length; i++) {
-      if (keysA[i] !== keysB[i]) {
-        console.log(
-          `[deepEqual] Object key mismatch at ${path}: keysA[${i}]=${keysA[i]}, keysB[${i}]=${keysB[i]}`,
-        );
-        return false;
-      }
-    }
-
-    // Recursively compare each property value
-    for (const key of keysA) {
-      if (!deepEqual(a[key], b[key], `${path}.${key}`)) return false;
-    }
-    return true;
   }
 
-  console.log(`[deepEqual] Unhandled case at ${path}`);
-  return false;
+  // Recursively compare all property values
+  for (const key of keys1) {
+    if (!deepEqual(obj1[key], obj2[key], `${path}.${key}`)) {
+      console.log(`[deepEqual] Property value mismatch at ${path}.${key}`);
+      return false;
+    }
+  }
+
+  return true;
 }
 
-/**
- * Deep comparison of two arrays of documents
- */
+// Helper function to compare arrays for equality
 function arraysEqual(a: any[], b: any[]): boolean {
-  const result = deepEqual(a, b, "documents");
-  if (!result) {
-    console.log(
-      `[arraysEqual] Arrays not equal. Lengths: a=${a.length}, b=${b.length}`,
-    );
-    console.log("--- End comparison ---");
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+
+  // Sort both arrays by _id for comparison
+  const sortedA = [...a].sort((x, y) =>
+    String(x._id).localeCompare(String(y._id)),
+  );
+  const sortedB = [...b].sort((x, y) =>
+    String(x._id).localeCompare(String(y._id)),
+  );
+
+  // Use deep equality instead of JSON.stringify to handle property order differences
+  for (let i = 0; i < sortedA.length; i++) {
+    sortedA[i]._id =
+      typeof sortedA[i]._id === "object"
+        ? sortedA[i]._id.toString()
+        : sortedA[i]._id;
+    sortedB[i]._id =
+      typeof sortedB[i]._id === "object"
+        ? sortedB[i]._id.toString()
+        : sortedB[i]._id;
+    if (!deepEqual(sortedA[i], sortedB[i])) {
+      return false;
+    }
   }
-  return result;
+
+  return true;
 }

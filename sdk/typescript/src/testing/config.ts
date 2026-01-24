@@ -70,30 +70,30 @@ export const experimentQueries: {
   //     },
   //   },
   // },
-  {
-    name: "editors_first_page",
-    query: {
-      roles: { $elemMatch: { role: "editor" } },
-      debitor: { $lte: 500000 },
-    },
-    options: {
-      sort: {
-        debitor: 1,
-        birthday: 1,
-        _id: 1,
-      },
-      skip: 0,
-      limit: 20,
-      projection: {
-        _id: 1,
-        email: 1,
-        archived: 1,
-        address: { street: 1, city: 1 },
-        debitor: 1,
-        birthday: 1,
-      },
-    },
-  },
+  // {
+  //   name: "editors_first_page",
+  //   query: {
+  //     roles: { $elemMatch: { role: "editor" } },
+  //     debitor: { $lte: 500000 },
+  //   },
+  //   options: {
+  //     sort: {
+  //       debitor: 1,
+  //       birthday: 1,
+  //       _id: 1,
+  //     },
+  //     skip: 0,
+  //     limit: 20,
+  //     projection: {
+  //       _id: 1,
+  //       email: 1,
+  //       archived: 1,
+  //       address: { street: 1, city: 1 },
+  //       debitor: 1,
+  //       birthday: 1,
+  //     },
+  //   },
+  // },
   {
     name: "editors_deep_pagination",
     query: {
