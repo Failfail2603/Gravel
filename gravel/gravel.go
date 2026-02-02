@@ -293,6 +293,8 @@ func (gravel *GravelServer) StartListening() {
 		newWatchQuery.WatchedDocuments = watchedDocuments
 		// Create a buffered channel for this watchquery to receive updates
 		newWatchQuery.UpdateChannel = make(chan types.DBChangeStreamEvent, 1000)
+		// Create ready channel to signal when initial query result has been sent
+		newWatchQuery.ReadyChan = make(chan struct{})
 		dbService.WatchQueriesMutex.Lock()
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
 		dbService.WatchQueriesMutex.Unlock()
@@ -327,6 +329,9 @@ func (gravel *GravelServer) StartListening() {
 		}
 
 		go func() {
+			// Wait until initial query result has been sent to client before processing updates
+			<-newWatchQuery.ReadyChan
+
 			for update := range newWatchQuery.UpdateChannel {
 				// Lock the watchquery to prevent concurrent modification during processing
 				newWatchQuery.Mutex.Lock()
@@ -392,6 +397,9 @@ func (gravel *GravelServer) StartListening() {
 			log.Println(response.Error)
 		}
 		m.Respond(responseData)
+
+		// Signal that watchquery is ready - this unblocks the update processing goroutine
+		close(newWatchQuery.ReadyChan)
 
 	})
 

@@ -43,7 +43,7 @@ export function resetRandomGenerators(seed: number = DEFAULT_SEED): void {
   // Reset our custom random generator seed
   __seed = seed;
 
-  // Reset faker's seed
+  // Reset faker's seed - this reseeds faker's internal Mersenne Twister
   faker.seed(seed);
 
   console.log(`Random generators reset with seed: ${seed}`);
@@ -66,3 +66,6 @@ export function getCurrentSeed(): number {
 
 // Auto-install on module load
 installSeededMathRandom();
+
+// Also seed faker immediately with default seed for consistent initialization
+faker.seed(DEFAULT_SEED);

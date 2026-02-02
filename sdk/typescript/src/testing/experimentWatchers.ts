@@ -19,6 +19,9 @@ export interface WatcherState {
   updateCount: number;
   lastUpdateTimestamp: number | null;
   lastUpdateWasNoop: boolean;
+  initialBytes: number;
+  totalUpdateBytes: number;
+  lastUpdateBytes: number;
 }
 
 export interface ExperimentWatchers {
@@ -51,6 +54,9 @@ const gravelState: WatcherState = {
   updateCount: 0,
   lastUpdateTimestamp: null,
   lastUpdateWasNoop: false,
+  initialBytes: 0,
+  totalUpdateBytes: 0,
+  lastUpdateBytes: 0,
 };
 
 const oldWatchQueryState: WatcherState = {
@@ -59,6 +65,9 @@ const oldWatchQueryState: WatcherState = {
   updateCount: 0,
   lastUpdateTimestamp: null,
   lastUpdateWasNoop: false,
+  initialBytes: 0,
+  totalUpdateBytes: 0,
+  lastUpdateBytes: 0,
 };
 
 // Promise resolvers for awaiting updates
@@ -93,10 +102,16 @@ async function startWatching(
   gravelState.lastUpdateReceived = false;
   gravelState.updateCount = 0;
   gravelState.lastUpdateWasNoop = false;
+  gravelState.initialBytes = 0;
+  gravelState.totalUpdateBytes = 0;
+  gravelState.lastUpdateBytes = 0;
   oldWatchQueryState.currentData = [];
   oldWatchQueryState.lastUpdateReceived = false;
   oldWatchQueryState.updateCount = 0;
   oldWatchQueryState.lastUpdateWasNoop = false;
+  oldWatchQueryState.initialBytes = 0;
+  oldWatchQueryState.totalUpdateBytes = 0;
+  oldWatchQueryState.lastUpdateBytes = 0;
 
   // Start Gravel watchQuery
   const { initialQuery, changes, stop } = await gravelMongoClient.watchQuery(
@@ -108,8 +123,12 @@ async function startWatching(
 
   // Set initial data for Gravel
   gravelState.currentData = initialQuery.result || initialQuery;
+  gravelState.initialBytes = Buffer.byteLength(
+    JSON.stringify(gravelState.currentData),
+    "utf-8",
+  );
   console.log(
-    `Gravel initial data: ${gravelState.currentData.length} documents`,
+    `Gravel initial data: ${gravelState.currentData.length} documents (${gravelState.initialBytes} bytes)`,
   );
 
   // Subscribe to Gravel changes
@@ -118,6 +137,11 @@ async function startWatching(
     gravelState.lastUpdateReceived = true;
     gravelState.updateCount++;
     gravelState.lastUpdateTimestamp = Date.now();
+
+    // Track bytes for this update
+    const updateBytes = Buffer.byteLength(JSON.stringify(patches), "utf-8");
+    gravelState.lastUpdateBytes = updateBytes;
+    gravelState.totalUpdateBytes += updateBytes;
 
     if (patches.length > 0) {
       // Apply patches to current data
@@ -152,7 +176,13 @@ async function startWatching(
           return;
         }
         oldWatchQueryState.currentData = data;
-        console.log(`OldWatchQuery initial data: ${data.length} documents`);
+        oldWatchQueryState.initialBytes = Buffer.byteLength(
+          JSON.stringify(data),
+          "utf-8",
+        );
+        console.log(
+          `OldWatchQuery initial data: ${data.length} documents (${oldWatchQueryState.initialBytes} bytes)`,
+        );
         isFirstEmit = false;
       } else {
         // Always mark that we received an update (even if noop)
@@ -165,9 +195,13 @@ async function startWatching(
           // Change was filtered out - don't update data
           console.log(`OldWatchQuery noop change`);
           oldWatchQueryState.lastUpdateWasNoop = true;
+          oldWatchQueryState.lastUpdateBytes = 0;
           // Data stays the same for noops
         } else {
           // This is a real update with new data
+          const updateBytes = Buffer.byteLength(JSON.stringify(data), "utf-8");
+          oldWatchQueryState.lastUpdateBytes = updateBytes;
+          oldWatchQueryState.totalUpdateBytes += updateBytes;
           oldWatchQueryState.currentData = data;
           oldWatchQueryState.lastUpdateWasNoop = false;
         }
@@ -250,9 +284,11 @@ function resetUpdateFlags(): void {
   gravelState.lastUpdateReceived = false;
   gravelState.lastUpdateTimestamp = null;
   gravelState.lastUpdateWasNoop = false;
+  gravelState.lastUpdateBytes = 0;
   oldWatchQueryState.lastUpdateReceived = false;
   oldWatchQueryState.lastUpdateTimestamp = null;
   oldWatchQueryState.lastUpdateWasNoop = false;
+  oldWatchQueryState.lastUpdateBytes = 0;
 }
 
 async function getGroundTruth(

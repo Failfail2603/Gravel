@@ -53,6 +53,10 @@ type WatchQuery struct {
 	// Stopped flag to signal graceful shutdown
 	// When true, update processing should stop immediately
 	Stopped bool
+
+	// ReadyChan is closed when the initial query result has been sent to the client.
+	// The update processing goroutine should wait on this before processing any updates.
+	ReadyChan chan struct{}
 }
 
 func (w *WatchQuery) IsInfiniteWindow() bool {
@@ -84,6 +88,11 @@ func (w *WatchQuery) SaveRemoveDocumentFromWindow(documentIndex int) {
 	// if -1 is passed we remove the last document
 	if documentIndex == -1 {
 		documentIndex = len(w.WatchedDocuments) - 1
+	}
+
+	// Guard against empty slice or invalid index
+	if len(w.WatchedDocuments) == 0 || documentIndex < 0 || documentIndex >= len(w.WatchedDocuments) {
+		return
 	}
 
 	// remove the document from the window

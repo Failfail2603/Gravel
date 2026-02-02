@@ -1,4 +1,6 @@
+import * as fs from "fs";
 import { ObjectId } from "mongodb";
+import * as path from "path";
 import {
   type GravelTestData,
   DEFAULT_COLLECTION_SIZE,
@@ -46,6 +48,9 @@ export interface UpdateMetric {
   durationMs: number;
   gravelLatencyMs: number;
   oldWatchQueryLatencyMs: number;
+  gravelUpdateBytes: number;
+  oldWatchQueryUpdateBytes: number;
+  groundTruthBytes: number;
 }
 
 export interface RepetitionResult {
@@ -55,6 +60,11 @@ export interface RepetitionResult {
   metrics: UpdateMetric[];
   startTime: number;
   endTime: number;
+  gravelInitialBytes: number;
+  oldWatchQueryInitialBytes: number;
+  gravelTotalUpdateBytes: number;
+  oldWatchQueryTotalUpdateBytes: number;
+  groundTruthTotalBytes: number;
 }
 
 export interface QueryResult {
@@ -107,6 +117,12 @@ export interface LiveExperimentState {
     durationMs: number;
     gravelMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
     oldWatchQueryMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
+    avgGravelLatencyMs: number;
+    avgOldWatchQueryLatencyMs: number;
+    avgGroundTruthLatencyMs: number;
+    avgGravelTotalBytes: number;
+    avgOldWatchQueryTotalBytes: number;
+    avgGroundTruthTotalBytes: number;
   }[];
   currentGravelMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
   currentOldWatchQueryMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
@@ -121,6 +137,7 @@ export interface LiveExperimentState {
     updateNumber: number;
     gravelLatencyMs: number;
     oldWatchQueryLatencyMs: number;
+    groundTruthLatencyMs: number;
   }[];
   error: string | null;
 }
@@ -164,6 +181,112 @@ function createEmptyMatrix(): ConfusionMatrix {
     falsePositive: 0,
     falseNegative: 0,
   };
+}
+
+function writeQueryResultsToCSV(
+  queryName: string,
+  repetitions: RepetitionResult[],
+  outputDir: string,
+): void {
+  // Ensure output directory exists
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // Sanitize query name for filename
+  const sanitizedName = queryName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const filename = path.join(outputDir, `${sanitizedName}.csv`);
+
+  // CSV header
+  const header = [
+    "repetition",
+    "update_number",
+    "operation_type",
+    "ground_truth_changed",
+    "gravel_outcome",
+    "old_watchquery_outcome",
+    "gravel_correct",
+    "old_watchquery_correct",
+    "duration_ms",
+    "gravel_latency_ms",
+    "old_watchquery_latency_ms",
+    "gravel_update_bytes",
+    "old_watchquery_update_bytes",
+    "ground_truth_bytes",
+  ].join(",");
+
+  // Build CSV rows from all repetitions
+  const rows: string[] = [header];
+
+  for (const rep of repetitions) {
+    for (const metric of rep.metrics) {
+      const row = [
+        rep.repetitionNumber,
+        metric.updateNumber,
+        metric.operationType,
+        metric.groundTruthChanged ? 1 : 0,
+        metric.gravelOutcome,
+        metric.oldWatchQueryOutcome,
+        metric.gravelCorrect ? 1 : 0,
+        metric.oldWatchQueryCorrect ? 1 : 0,
+        metric.durationMs,
+        metric.gravelLatencyMs,
+        metric.oldWatchQueryLatencyMs,
+        metric.gravelUpdateBytes,
+        metric.oldWatchQueryUpdateBytes,
+        metric.groundTruthBytes,
+      ].join(",");
+      rows.push(row);
+    }
+  }
+
+  fs.writeFileSync(filename, rows.join("\n"), "utf-8");
+
+  // Write summary CSV with averaged total bytes per repetition
+  const summaryFilename = path.join(outputDir, `${sanitizedName}_summary.csv`);
+  const summaryHeader = [
+    "repetition",
+    "gravel_total_bytes",
+    "old_watchquery_total_bytes",
+    "ground_truth_total_bytes",
+  ].join(",");
+
+  const summaryRows: string[] = [summaryHeader];
+  let avgGravelTotal = 0,
+    avgOldTotal = 0,
+    avgGroundTruth = 0;
+
+  for (const rep of repetitions) {
+    const gravelTotal = rep.gravelInitialBytes + rep.gravelTotalUpdateBytes;
+    const oldTotal =
+      rep.oldWatchQueryInitialBytes + rep.oldWatchQueryTotalUpdateBytes;
+
+    avgGravelTotal += gravelTotal;
+    avgOldTotal += oldTotal;
+    avgGroundTruth += rep.groundTruthTotalBytes;
+
+    const summaryRow = [
+      rep.repetitionNumber,
+      gravelTotal,
+      oldTotal,
+      rep.groundTruthTotalBytes,
+    ].join(",");
+    summaryRows.push(summaryRow);
+  }
+
+  // Add average row
+  const count = repetitions.length;
+  const avgRow = [
+    "avg",
+    (avgGravelTotal / count).toFixed(2),
+    (avgOldTotal / count).toFixed(2),
+    (avgGroundTruth / count).toFixed(2),
+  ].join(",");
+  summaryRows.push(avgRow);
+
+  fs.writeFileSync(summaryFilename, summaryRows.join("\n"), "utf-8");
+  console.log(`  Summary CSV saved: ${summaryFilename}`);
+  console.log(`  CSV saved: ${filename}`);
 }
 
 function matrixToArray(
@@ -241,6 +364,18 @@ function aggregateMatrices(matrices: ConfusionMatrix[]): ConfusionMatrix {
   );
 }
 
+function averageMatrices(matrices: ConfusionMatrix[]): ConfusionMatrix {
+  if (matrices.length === 0) return createEmptyMatrix();
+  const sum = aggregateMatrices(matrices);
+  const count = matrices.length;
+  return {
+    truePositive: sum.truePositive / count,
+    trueNegative: sum.trueNegative / count,
+    falsePositive: sum.falsePositive / count,
+    falseNegative: sum.falseNegative / count,
+  };
+}
+
 export function isExperimentRunning(): boolean {
   return experimentRunning;
 }
@@ -260,6 +395,17 @@ export function getLiveExperimentState(): LiveExperimentState {
 export function generateExperimentId(): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `experiment_${timestamp}`;
+}
+
+// Helper to get a deterministic document using seeded skip instead of $sample
+async function getRandomDocument(
+  collection: any,
+  totalUsers: number,
+): Promise<any | null> {
+  if (totalUsers === 0) return null;
+  const skipCount = Math.floor(Math.random() * totalUsers);
+  const docs = await collection.find({}).skip(skipCount).limit(1).toArray();
+  return docs.length > 0 ? docs[0] : null;
 }
 
 async function performRandomUpdate(
@@ -289,10 +435,8 @@ async function performRandomUpdate(
 
   switch (selectedOp) {
     case "update": {
-      const usersToUpdate = await collection
-        .aggregate([{ $sample: { size: 1 } }])
-        .toArray();
-      for (const user of usersToUpdate) {
+      const user = await getRandomDocument(collection, totalUsers);
+      if (user) {
         const updateFields = generateRandomUpdateFields();
         bulkOps.push({
           updateOne: {
@@ -304,10 +448,8 @@ async function performRandomUpdate(
       break;
     }
     case "replace": {
-      const usersToReplace = await collection
-        .aggregate([{ $sample: { size: 1 } }])
-        .toArray();
-      for (const user of usersToReplace) {
+      const user = await getRandomDocument(collection, totalUsers);
+      if (user) {
         const replacementDocument: GravelTestData = {
           _id: user._id,
           email: generateRandomEmail(),
@@ -334,10 +476,8 @@ async function performRandomUpdate(
     }
     case "delete": {
       if (totalUsers > Math.max(100, targetSize * 0.1)) {
-        const usersToDelete = await collection
-          .aggregate([{ $sample: { size: 1 } }])
-          .toArray();
-        for (const user of usersToDelete) {
+        const user = await getRandomDocument(collection, totalUsers);
+        if (user) {
           bulkOps.push({ deleteOne: { filter: { _id: user._id } } });
         }
       } else {
@@ -407,6 +547,7 @@ async function runRepetition(
   const oldWatchQueryMatrix = createEmptyMatrix();
   const metrics: UpdateMetric[] = [];
   const startTime = Date.now();
+  let groundTruthTotalBytes = 0;
 
   resetRandomGenerators(seed);
 
@@ -454,7 +595,14 @@ async function runRepetition(
 
     await watchers.waitForUpdates(3000);
 
+    const groundTruthStartTime = Date.now();
     const groundTruth = await watchers.getGroundTruth("users", query, options);
+    const groundTruthLatencyMs = Date.now() - groundTruthStartTime;
+    const groundTruthBytes = Buffer.byteLength(
+      JSON.stringify(groundTruth),
+      "utf-8",
+    );
+    groundTruthTotalBytes += groundTruthBytes;
 
     const gravelStateAfter = [...watchers.gravelState.currentData];
     const oldWatchQueryStateAfter = [
@@ -508,6 +656,9 @@ async function runRepetition(
       durationMs: updateEndTime - updateStartTime,
       gravelLatencyMs,
       oldWatchQueryLatencyMs,
+      gravelUpdateBytes: watchers.gravelState.lastUpdateBytes,
+      oldWatchQueryUpdateBytes: watchers.oldWatchQueryState.lastUpdateBytes,
+      groundTruthBytes,
     };
 
     metrics.push(metric);
@@ -524,6 +675,7 @@ async function runRepetition(
       updateNumber: i + 1,
       gravelLatencyMs,
       oldWatchQueryLatencyMs,
+      groundTruthLatencyMs,
     });
     if (liveState.latencyHistory.length > 500) {
       liveState.latencyHistory.shift();
@@ -558,6 +710,11 @@ async function runRepetition(
     metrics,
     startTime,
     endTime,
+    gravelInitialBytes: watchers.gravelState.initialBytes,
+    oldWatchQueryInitialBytes: watchers.oldWatchQueryState.initialBytes,
+    gravelTotalUpdateBytes: watchers.gravelState.totalUpdateBytes,
+    oldWatchQueryTotalUpdateBytes: watchers.oldWatchQueryState.totalUpdateBytes,
+    groundTruthTotalBytes,
   };
 }
 
@@ -659,10 +816,10 @@ export async function runExperimentSuite(
         );
       }
 
-      const aggregatedGravelMatrix = aggregateMatrices(
+      const aggregatedGravelMatrix = averageMatrices(
         repetitions.map((r) => r.gravelConfusionMatrix),
       );
-      const aggregatedOldWatchQueryMatrix = aggregateMatrices(
+      const aggregatedOldWatchQueryMatrix = averageMatrices(
         repetitions.map((r) => r.oldWatchQueryConfusionMatrix),
       );
 
@@ -677,6 +834,46 @@ export async function runExperimentSuite(
 
       queryResults.push(queryResult);
 
+      // Calculate average latencies and bytes across repetitions
+      const avgGravelLatencyMs =
+        repetitions.reduce(
+          (sum, r) =>
+            sum +
+            r.metrics.reduce((s, m) => s + m.gravelLatencyMs, 0) /
+              r.metrics.length,
+          0,
+        ) / repetitions.length;
+      const avgOldWatchQueryLatencyMs =
+        repetitions.reduce(
+          (sum, r) =>
+            sum +
+            r.metrics.reduce((s, m) => s + m.oldWatchQueryLatencyMs, 0) /
+              r.metrics.length,
+          0,
+        ) / repetitions.length;
+      const avgGroundTruthLatencyMs =
+        repetitions.reduce(
+          (sum, r) =>
+            sum +
+            r.metrics.reduce((s, m) => s + m.groundTruthBytes, 0) /
+              r.metrics.length,
+          0,
+        ) / repetitions.length;
+      const avgGravelTotalBytes =
+        repetitions.reduce(
+          (sum, r) => sum + r.gravelInitialBytes + r.gravelTotalUpdateBytes,
+          0,
+        ) / repetitions.length;
+      const avgOldWatchQueryTotalBytes =
+        repetitions.reduce(
+          (sum, r) =>
+            sum + r.oldWatchQueryInitialBytes + r.oldWatchQueryTotalUpdateBytes,
+          0,
+        ) / repetitions.length;
+      const avgGroundTruthTotalBytes =
+        repetitions.reduce((sum, r) => sum + r.groundTruthTotalBytes, 0) /
+        repetitions.length;
+
       liveState.completedQueries.push({
         queryIndex: qi,
         queryName: experimentQuery.name,
@@ -686,6 +883,12 @@ export async function runExperimentSuite(
         ),
         gravelMatrix: matrixToArray(aggregatedGravelMatrix),
         oldWatchQueryMatrix: matrixToArray(aggregatedOldWatchQueryMatrix),
+        avgGravelLatencyMs,
+        avgOldWatchQueryLatencyMs,
+        avgGroundTruthLatencyMs,
+        avgGravelTotalBytes,
+        avgOldWatchQueryTotalBytes,
+        avgGroundTruthTotalBytes,
       });
       updateAggregatedMatrices();
 
@@ -704,6 +907,9 @@ export async function runExperimentSuite(
       console.log(
         `    OldWatchQuery:  TP=${aggregatedOldWatchQueryMatrix.truePositive} TN=${aggregatedOldWatchQueryMatrix.trueNegative} FP=${aggregatedOldWatchQueryMatrix.falsePositive} FN=${aggregatedOldWatchQueryMatrix.falseNegative} (${((oldTotal / totalUpdates) * 100).toFixed(2)}% correct)`,
       );
+
+      // Write CSV for this query
+      writeQueryResultsToCSV(experimentQuery.name, repetitions, outputDir);
     }
 
     const totalGravelMatrix = aggregateMatrices(
