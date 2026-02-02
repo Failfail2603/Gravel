@@ -6,7 +6,7 @@ export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
 
 // Experiment configuration
-export const UPDATES_PER_QUERY = 20;
+export const UPDATES_PER_QUERY = 100;
 export const REPETITIONS_PER_QUERY = 3;
 export const DEFAULT_EXPERIMENT_SEED = 123456789;
 export const DEFAULT_COLLECTION_SIZE = 50000;
@@ -71,7 +71,7 @@ export const experimentQueries: {
     },
   },
   {
-    name: "editors_first_page",
+    name: "common_query",
     query: {
       roles: { $elemMatch: { role: "editor" } },
       debitor: { $lte: 500000 },
@@ -95,7 +95,7 @@ export const experimentQueries: {
     },
   },
   {
-    name: "editors_deep_pagination",
+    name: "common_query_deep_pagination",
     query: {
       roles: { $elemMatch: { role: "editor" } },
       debitor: { $lte: 500000 },

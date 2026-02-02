@@ -591,6 +591,29 @@
     <script>
       let pollInterval = null;
       let latencyChart = null;
+      let lastExperimentId = null;
+
+      function clampPercent(value) {
+        if (!isFinite(value)) return 0;
+        return Math.max(0, Math.min(100, value));
+      }
+
+      function resetExperimentUI() {
+        const progressBar = document.getElementById("progressBar");
+        progressBar.style.width = "0%";
+        progressBar.textContent = "0%";
+
+        const updateBar = document.getElementById("updateProgressBar");
+        updateBar.style.width = "0%";
+        updateBar.textContent = "0%";
+
+        document.getElementById("queryList").innerHTML = "";
+
+        if (latencyChart) {
+          latencyChart.destroy();
+          latencyChart = null;
+        }
+      }
 
       function formatTime(ms) {
         if (ms < 0 || !isFinite(ms)) return "--:--";
@@ -630,6 +653,12 @@
         const matrixCard = document.getElementById("matrixCard");
         const queriesCard = document.getElementById("queriesCard");
         const errorMessage = document.getElementById("errorMessage");
+
+        // Reset UI elements when a new experiment starts to avoid jumpy progress.
+        if (state.experimentId && state.experimentId !== lastExperimentId) {
+          lastExperimentId = state.experimentId;
+          resetExperimentUI();
+        }
 
         // Update status badge
         statusBadge.className = "status-badge";
@@ -722,17 +751,25 @@
             state.totalQueries *
             state.repetitionsPerQuery *
             state.updatesPerQuery;
+
+          const safeRepetition = Math.max(1, state.currentRepetition || 1);
+          const safeUpdateNumber = Math.max(0, state.currentUpdateNumber || 0);
+          const completedQueriesCount = Math.max(
+            0,
+            Math.min(state.completedQueries.length, state.totalQueries),
+          );
           const completedWork =
-            state.completedQueries.length *
+            completedQueriesCount *
               state.repetitionsPerQuery *
               state.updatesPerQuery +
-            (state.currentRepetition - 1) * state.updatesPerQuery +
-            state.currentUpdateNumber;
+            (safeRepetition - 1) * state.updatesPerQuery +
+            safeUpdateNumber;
           const overallProgress =
             totalWork > 0 ? (completedWork / totalWork) * 100 : 0;
           const progressBar = document.getElementById("progressBar");
-          progressBar.style.width = `${Math.min(100, overallProgress)}%`;
-          progressBar.textContent = `${Math.round(overallProgress)}%`;
+          const overallProgressClamped = clampPercent(overallProgress);
+          progressBar.style.width = `${overallProgressClamped}%`;
+          progressBar.textContent = `${Math.round(overallProgressClamped)}%`;
 
           // Update progress
           document.getElementById("lastOpType").textContent =
@@ -744,11 +781,12 @@
 
           const updateProgress =
             state.updatesPerQuery > 0
-              ? (state.currentUpdateNumber / state.updatesPerQuery) * 100
+              ? (safeUpdateNumber / state.updatesPerQuery) * 100
               : 0;
           const updateBar = document.getElementById("updateProgressBar");
-          updateBar.style.width = `${Math.min(100, updateProgress)}%`;
-          updateBar.textContent = `${Math.round(updateProgress)}%`;
+          const updateProgressClamped = clampPercent(updateProgress);
+          updateBar.style.width = `${updateProgressClamped}%`;
+          updateBar.textContent = `${Math.round(updateProgressClamped)}%`;
 
           // Time stats
           const elapsed = state.startTime ? Date.now() - state.startTime : 0;
