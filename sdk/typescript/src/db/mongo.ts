@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import type { NatsConnection } from "nats";
 import { BehaviorSubject, Subject } from "rxjs";
 import { Observable } from "rxjs/internal/Observable";
@@ -105,6 +106,10 @@ export interface GravelMongoClient extends GravelClient {
 function preprocessRegexInQuery(obj: any): any {
   if (obj === null || typeof obj !== "object") {
     return obj;
+  }
+
+  if (obj instanceof ObjectId) {
+    return { $oid: obj.toHexString() };
   }
 
   if (obj instanceof RegExp) {

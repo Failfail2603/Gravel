@@ -57,6 +57,65 @@ type WatchQuery struct {
 	// ReadyChan is closed when the initial query result has been sent to the client.
 	// The update processing goroutine should wait on this before processing any updates.
 	ReadyChan chan struct{}
+
+	// Unbounded update queue: updates are appended here and drained into UpdateChannel
+	pendingUpdates []types.DBChangeStreamEvent
+	queueMutex     sync.Mutex
+	queueNotify    chan struct{} // capacity 1, signals drainer that items are available
+	drainDone      chan struct{} // closed when drainer goroutine exits
+}
+
+// EnqueueUpdate appends an update to the unbounded queue (never blocks, never drops).
+func (w *WatchQuery) EnqueueUpdate(event types.DBChangeStreamEvent) {
+	w.queueMutex.Lock()
+	w.pendingUpdates = append(w.pendingUpdates, event)
+	w.queueMutex.Unlock()
+	// non-blocking signal to the drainer
+	select {
+	case w.queueNotify <- struct{}{}:
+	default:
+	}
+}
+
+// StartDrainer launches a goroutine that drains the pending queue into UpdateChannel.
+func (w *WatchQuery) StartDrainer() {
+	w.queueNotify = make(chan struct{}, 1)
+	w.drainDone = make(chan struct{})
+	go func() {
+		defer close(w.drainDone)
+		for range w.queueNotify {
+			w.drainPending()
+		}
+		// Final drain after queueNotify is closed to flush remaining items
+		w.drainPending()
+		close(w.UpdateChannel)
+	}()
+}
+
+// drainPending sends all queued updates into UpdateChannel.
+func (w *WatchQuery) drainPending() {
+	for {
+		w.queueMutex.Lock()
+		if len(w.pendingUpdates) == 0 {
+			w.queueMutex.Unlock()
+			return
+		}
+		// Swap out the slice so we can release the lock quickly
+		batch := w.pendingUpdates
+		w.pendingUpdates = nil
+		w.queueMutex.Unlock()
+
+		for _, event := range batch {
+			w.UpdateChannel <- event
+		}
+	}
+}
+
+// StopDrainer signals the drainer to flush remaining items and stop.
+// It blocks until the drainer has finished and UpdateChannel is closed.
+func (w *WatchQuery) StopDrainer() {
+	close(w.queueNotify)
+	<-w.drainDone
 }
 
 func (w *WatchQuery) IsInfiniteWindow() bool {

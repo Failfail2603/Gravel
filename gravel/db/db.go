@@ -33,6 +33,7 @@ type DBProvider interface {
 	GetNewPositionForDocument(documents []types.WatchedDocument, oldIndex int, sortFields []types.SortField) int
 	GetPositionForDocumentInWindow(documents []types.WatchedDocument, document types.WatchedDocument, sortFields []types.SortField) int
 	ProjectDocument(document types.Document, options string, nestedPath string) (types.Document, error)
+	GetAndResetQueryCount() int64
 }
 
 type DBService struct {
@@ -43,7 +44,7 @@ type DBService struct {
 	 * The currently open WatchQueries on the database client
 	 */
 	WatchQueries map[string]*WatchQuery
-	
+
 	// Mutex to protect concurrent access to WatchQueries map
 	WatchQueriesMutex sync.RWMutex
 }

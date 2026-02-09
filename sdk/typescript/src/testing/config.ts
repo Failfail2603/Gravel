@@ -6,10 +6,10 @@ export const MONGO_URL = "mongodb://localhost:27017/gravel_db";
 export const USE_BULK_OPERATIONS = true;
 
 // Experiment configuration
-export const UPDATES_PER_QUERY = 100;
+export const UPDATES_PER_QUERY = 1000;
 export const REPETITIONS_PER_QUERY = 3;
 export const DEFAULT_EXPERIMENT_SEED = 123456789;
-export const DEFAULT_COLLECTION_SIZE = 50000;
+export const DEFAULT_COLLECTION_SIZE = 500000;
 
 // Custom bulk operation generator type
 export interface BulkOperationStats {
@@ -63,7 +63,7 @@ export const experimentQueries: {
   // simple subscribe by _id
   {
     name: "single_document_by_id",
-    query: { _id: new ObjectId("693aa602358f323fc2b27129") },
+    query: { _id: new ObjectId("698a02c7ec4bcded374966f7") },
     options: {
       sort: {
         _id: 1,

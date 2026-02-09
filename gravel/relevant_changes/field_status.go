@@ -60,6 +60,10 @@ func isSingleFieldInRelevantArray(fieldPath string, relevantFields []string) boo
 }
 
 func IsProjectedField(watchQuery *db.WatchQuery, singleUpdate *types.FieldUpdate) bool {
+	// if the query has no projection we project everything
+	if watchQuery.QueryInformation.NoProjection {
+		return true
+	}
 	return isSingleFieldInRelevantArray(singleUpdate.Field, watchQuery.QueryInformation.ProjectionFields)
 }
 

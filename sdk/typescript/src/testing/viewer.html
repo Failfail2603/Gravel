@@ -1013,7 +1013,7 @@
               </div>
               
               <!-- Metrics Summary -->
-              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
                 <div style="text-align: center;">
                   <div style="font-size: 11px; color: #888; text-transform: uppercase;">Avg Latency</div>
                   <div style="margin-top: 4px;">
@@ -1028,6 +1028,14 @@
                     <span style="color: #51cf66; font-weight: 600;">${formatBytes(q.avgGravelTotalBytes || 0)}</span>
                     <span style="color: #666; margin: 0 4px;">vs</span>
                     <span style="color: #ffd43b; font-weight: 600;">${formatBytes(q.avgOldWatchQueryTotalBytes || 0)}</span>
+                  </div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="font-size: 11px; color: #888; text-transform: uppercase;">DB Queries</div>
+                  <div style="margin-top: 4px;">
+                    <span style="color: #51cf66; font-weight: 600;">${(q.avgGravelDbQueries || 0).toFixed(1)}</span>
+                    <span style="color: #666; margin: 0 4px;">vs</span>
+                    <span style="color: #ffd43b; font-weight: 600;">${(q.avgOldWatchQueryDbQueries || 0).toFixed(1)}</span>
                   </div>
                 </div>
                 <div style="text-align: center;">

@@ -30,6 +30,14 @@ export function getCurrentWatchQueryCount() {
   return counter;
 }
 
+let dbQueryCounter = 0;
+
+export function getAndResetDbQueryCount(): number {
+  const count = dbQueryCounter;
+  dbQueryCounter = 0;
+  return count;
+}
+
 export let mongoChangeStream: ChangeStream | null = null;
 
 const changeStreamSubjects = new Map<
@@ -142,12 +150,16 @@ export function watchQuery<T extends Document>(
     Promise.resolve(mongoClient!.db().collection(collectionName))
       .then((collection) => collection.find<T>(query, options).toArray())
       .then((initialData) => {
+        initialData.forEach((d) => {
+          d._id = d._id.toString();
+        });
         lastIDs = initialData.map((entry) => entry._id) as string[];
         if (lastIDs.length > 100)
           console.error(
             { collection: collectionName, lengthOfData: lastIDs.length },
             "Watched data in watchQuery is longer than 100. This could to heavy performance degradations.",
           );
+
         return initialData;
       }),
     subject.pipe(
@@ -161,11 +173,15 @@ export function watchQuery<T extends Document>(
             options,
           )
         ) {
+          dbQueryCounter++;
           const freshData = await mongoClient!
             .db()
             .collection(collectionName)
             .find(query, options)
             .toArray();
+          freshData.forEach((d) => {
+            d._id = d._id.toString();
+          });
           lastIDs = freshData.map((r) => r._id.toString());
 
           return freshData as unknown as T[];
@@ -174,7 +190,7 @@ export function watchQuery<T extends Document>(
           return NOOP_CHANGE;
         }
       }),
-      throttleTime(500, undefined, { leading: true, trailing: true }),
+      // throttleTime removed for testing - was causing delayed emissions and stale latency
     ),
   ).pipe(
     finalize(() => {
@@ -206,6 +222,7 @@ const checkIfChangeIsRelevant = async <T extends { _id: string }>(
   if (!result) return false;
 
   // this should always be the last check to avoid unnecessary db calls
+  dbQueryCounter++;
   const ids = (
     await mongoClient!
       .db()
@@ -219,7 +236,7 @@ const checkIfChangeIsRelevant = async <T extends { _id: string }>(
 
   return (
     // check if changed document is included in our current query
-    idsMapped.includes(doc.documentKey._id) ||
+    idsMapped.includes(doc.documentKey._id.toString()) ||
     // check if skip/limit window moved because of update/insert/replace before window
     new Set(lastIDs.concat(idsMapped)).size !== lastIDs.length ||
     // check if window shrinks or grows because of query (update/insert/replace)
@@ -237,11 +254,11 @@ const match = (
     case "update":
     case "replace":
       return (
-        lastIDs.includes((doc.documentKey as any)._id) ||
+        lastIDs.includes((doc.documentKey as any)._id.toString()) ||
         mingo.find([doc.fullDocument], query).count()
       );
     case "delete":
-      return lastIDs.includes((doc.documentKey as any)._id);
+      return lastIDs.includes((doc.documentKey as any)._id.toString());
     case "drop":
     case "dropDatabase":
     case "invalidate":

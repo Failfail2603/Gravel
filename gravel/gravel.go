@@ -295,6 +295,7 @@ func (gravel *GravelServer) StartListening() {
 		newWatchQuery.UpdateChannel = make(chan types.DBChangeStreamEvent, 1000)
 		// Create ready channel to signal when initial query result has been sent
 		newWatchQuery.ReadyChan = make(chan struct{})
+		newWatchQuery.StartDrainer()
 		dbService.WatchQueriesMutex.Lock()
 		dbService.WatchQueries[req.Hash] = &newWatchQuery
 		dbService.WatchQueriesMutex.Unlock()
@@ -309,20 +310,14 @@ func (gravel *GravelServer) StartListening() {
 					// Broadcast to all watchquery channels
 					dbService.WatchQueriesMutex.RLock()
 					for _, wq := range dbService.WatchQueries {
-						select {
-						case wq.UpdateChannel <- update:
-							// Successfully sent
-						default:
-							// Channel full, skip this watchquery (non-blocking)
-							log.Printf("Warning: UpdateChannel full for watchquery %s, dropping update", wq.Hash)
-						}
+						wq.EnqueueUpdate(update)
 					}
 					dbService.WatchQueriesMutex.RUnlock()
 				}
-				// Close all watchquery channels when dispatcher stops
+				// Stop all watchquery drainers (flushes remaining items and closes UpdateChannel)
 				dbService.WatchQueriesMutex.RLock()
 				for _, wq := range dbService.WatchQueries {
-					close(wq.UpdateChannel)
+					wq.StopDrainer()
 				}
 				dbService.WatchQueriesMutex.RUnlock()
 			}()
@@ -403,6 +398,32 @@ func (gravel *GravelServer) StartListening() {
 
 	})
 
+	gravel.natsConnection.SubscribeTo("gravel.metrics.querycount", func(m *nats.Msg) {
+		log.Println("Received gravel.metrics.querycount request")
+		var req struct {
+			ClientID string `json:"clientID"`
+		}
+		if err := json.Unmarshal(m.Data, &req); err != nil {
+			m.Respond([]byte(`{"error":"invalid request"}`))
+			return
+		}
+
+		dbService := gravel.dbServices[req.ClientID]
+		if dbService == nil {
+			m.Respond([]byte(`{"count":0}`))
+			return
+		}
+
+		// Get the count and reset it; subtract 1 for the initial query
+		count := dbService.Connection.GetAndResetQueryCount()
+		if count > 0 {
+			count--
+		}
+
+		response := fmt.Sprintf(`{"count":%d}`, count)
+		m.Respond([]byte(response))
+	})
+
 	gravel.natsConnection.SubscribeTo("gravel.watchquery.stop", func(m *nats.Msg) {
 		log.Println("Received gravel.watchquery.stop request")
 		var req types.WatchQueryStopRequest
@@ -463,8 +484,8 @@ func (gravel *GravelServer) StartListening() {
 
 			dbService.Connection.StopChangeStream()
 
-			// Close the watchquery's update channel (the update goroutine will exit gracefully)
-			close(watchQuery.UpdateChannel)
+			// Stop the drainer (flushes remaining items and closes UpdateChannel)
+			watchQuery.StopDrainer()
 			delete(dbService.WatchQueries, req.Hash)
 		}
 

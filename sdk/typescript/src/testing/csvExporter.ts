@@ -29,6 +29,8 @@ interface RepetitionResult {
   metrics: UpdateMetric[];
   startTime: number;
   endTime: number;
+  gravelDbQueries: number;
+  oldWatchQueryDbQueries: number;
 }
 
 interface QueryResult {
@@ -149,11 +151,22 @@ function queryConfusionMatricesToCSV(result: ExperimentResult): string {
     "precision",
     "recall",
     "f1Score",
+    "avgDbQueries",
   ];
 
   const rows: string[] = [headers.join(",")];
 
   for (const q of result.queryResults) {
+    const repCount = q.repetitions.length || 1;
+    const avgGravelDbQueries =
+      q.repetitions.reduce((sum, r) => sum + (r.gravelDbQueries || 0), 0) /
+      repCount;
+    const avgOldDbQueries =
+      q.repetitions.reduce(
+        (sum, r) => sum + (r.oldWatchQueryDbQueries || 0),
+        0,
+      ) / repCount;
+
     // Gravel row
     const gravelMetrics = calculateMetrics(q.aggregatedGravelMatrix);
     rows.push(
@@ -169,6 +182,7 @@ function queryConfusionMatricesToCSV(result: ExperimentResult): string {
         gravelMetrics.precision.toFixed(4),
         gravelMetrics.recall.toFixed(4),
         gravelMetrics.f1Score.toFixed(4),
+        avgGravelDbQueries.toFixed(2),
       ].join(","),
     );
 
@@ -187,6 +201,7 @@ function queryConfusionMatricesToCSV(result: ExperimentResult): string {
         oldMetrics.precision.toFixed(4),
         oldMetrics.recall.toFixed(4),
         oldMetrics.f1Score.toFixed(4),
+        avgOldDbQueries.toFixed(2),
       ].join(","),
     );
   }

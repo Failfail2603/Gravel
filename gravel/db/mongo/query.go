@@ -1,7 +1,6 @@
 package mongo
 
 import (
-	"encoding/json"
 	"log"
 	"strings"
 
@@ -42,7 +41,9 @@ func parseQueryString(queryString string) (bson.M, error) {
 		return filter, nil
 	}
 
-	if err := json.Unmarshal([]byte(queryString), &filter); err != nil {
+	// Prefer Extended JSON parsing so types like ObjectId ({"$oid": "..."}) are
+	// converted into native BSON types.
+	if err := bson.UnmarshalExtJSON([]byte(queryString), true, &filter); err != nil {
 		log.Printf("Failed to parse query string: %v", err)
 		return nil, err
 	}

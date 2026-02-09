@@ -15,7 +15,7 @@ import "./randomGenerator.js";
 export async function regenerateDatabase(
   count: number,
   collectionName: string = "users",
-): Promise<void> {
+): Promise<ObjectId[]> {
   console.log(
     `Regenerating database with ${count} documents in collection "${collectionName}"...`,
   );
@@ -80,4 +80,6 @@ export async function regenerateDatabase(
   console.log(
     `Successfully regenerated "${collectionName}" with ${count} documents!`,
   );
+
+  return documents.slice(0, Math.min(100, documents.length)).map((d) => d._id);
 }

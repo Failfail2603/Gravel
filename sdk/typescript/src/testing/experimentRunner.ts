@@ -26,6 +26,7 @@ import {
   createExperimentWatchers,
 } from "./experimentWatchers.js";
 import { getMongoClient } from "./mongoClient.js";
+import { getAndResetDbQueryCount } from "./oldWatchQuery.js";
 import { resetRandomGenerators } from "./randomGenerator.js";
 import { regenerateDatabase } from "./regenerateDatabase.js";
 
@@ -65,6 +66,8 @@ export interface RepetitionResult {
   gravelTotalUpdateBytes: number;
   oldWatchQueryTotalUpdateBytes: number;
   groundTruthTotalBytes: number;
+  gravelDbQueries: number;
+  oldWatchQueryDbQueries: number;
 }
 
 export interface QueryResult {
@@ -123,6 +126,8 @@ export interface LiveExperimentState {
     avgGravelTotalBytes: number;
     avgOldWatchQueryTotalBytes: number;
     avgGroundTruthTotalBytes: number;
+    avgGravelDbQueries: number;
+    avgOldWatchQueryDbQueries: number;
   }[];
   currentGravelMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
   currentOldWatchQueryMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
@@ -249,6 +254,8 @@ function writeQueryResultsToCSV(
     "gravel_total_bytes",
     "old_watchquery_total_bytes",
     "ground_truth_total_bytes",
+    "gravel_db_queries",
+    "old_watchquery_db_queries",
   ].join(",");
 
   const summaryRows: string[] = [summaryHeader];
@@ -270,6 +277,8 @@ function writeQueryResultsToCSV(
       gravelTotal,
       oldTotal,
       rep.groundTruthTotalBytes,
+      rep.gravelDbQueries,
+      rep.oldWatchQueryDbQueries,
     ].join(",");
     summaryRows.push(summaryRow);
   }
@@ -411,7 +420,22 @@ async function getRandomDocument(
 async function performRandomUpdate(
   collection: any,
   totalUsers: number,
+  forceTargetId?: ObjectId,
 ): Promise<{ operationType: string }> {
+  if (forceTargetId) {
+    const bulkOps = [
+      {
+        updateOne: {
+          filter: { _id: forceTargetId },
+          update: { $set: generateRandomUpdateFields() },
+        },
+      },
+    ];
+
+    await collection.bulkWrite(bulkOps, { ordered: false });
+    return { operationType: "update" };
+  }
+
   const targetSize = DEFAULT_COLLECTION_SIZE;
   const sizeDelta = totalUsers - targetSize;
 
@@ -543,6 +567,11 @@ async function runRepetition(
   const collection = client.db().collection<GravelTestData>("users");
   const watchers = createExperimentWatchers();
 
+  const isSingleIdQuery = (q: Record<string, any>): q is { _id: ObjectId } => {
+    const keys = Object.keys(q);
+    return keys.length === 1 && keys[0] === "_id" && q._id instanceof ObjectId;
+  };
+
   const gravelMatrix = createEmptyMatrix();
   const oldWatchQueryMatrix = createEmptyMatrix();
   const metrics: UpdateMetric[] = [];
@@ -555,11 +584,19 @@ async function runRepetition(
   console.log(
     `    Regenerating database with ${dbCollectionSize} documents...`,
   );
-  await regenerateDatabase(dbCollectionSize, "users");
+
+  const regeneratedIds = await regenerateDatabase(dbCollectionSize, "users");
+  const queryForRepetition: Record<string, any> = { ...query };
+  if (isSingleIdQuery(queryForRepetition) && regeneratedIds.length > 0) {
+    queryForRepetition._id = regeneratedIds[0];
+  }
 
   liveState.phase = "starting_watchers";
   console.log(`    Starting watchers...`);
-  await watchers.startWatching("users", query, options);
+  await watchers.startWatching("users", queryForRepetition, options);
+
+  console.log(`    Draining stale change stream events from regeneration...`);
+  await watchers.drainStaleEvents();
 
   liveState.phase = "running_updates";
   liveState.currentRepetition = repetitionNumber;
@@ -572,6 +609,10 @@ async function runRepetition(
   }
 
   console.log(`    Running ${updatesPerQuery} updates...`);
+
+  const guaranteedHitId = isSingleIdQuery(queryForRepetition)
+    ? queryForRepetition._id
+    : undefined;
 
   for (let i = 0; i < updatesPerQuery; i++) {
     if (stopRequested) {
@@ -590,13 +631,23 @@ async function runRepetition(
 
     const updateStartTime = Date.now();
     const totalUsers = await collection.countDocuments({});
-    const { operationType } = await performRandomUpdate(collection, totalUsers);
     const updateIssuedTime = Date.now();
+    const { operationType } = await performRandomUpdate(
+      collection,
+      totalUsers,
+      i === 0 ? guaranteedHitId : undefined,
+    );
+    // Subtract the write duration to isolate propagation + processing time
+    const writeDurationMs = Date.now() - updateIssuedTime;
 
-    await watchers.waitForUpdates(3000);
+    await watchers.waitForUpdates(4000);
 
     const groundTruthStartTime = Date.now();
-    const groundTruth = await watchers.getGroundTruth("users", query, options);
+    const groundTruth = await watchers.getGroundTruth(
+      "users",
+      queryForRepetition,
+      options,
+    );
     const groundTruthLatencyMs = Date.now() - groundTruthStartTime;
     const groundTruthBytes = Buffer.byteLength(
       JSON.stringify(groundTruth),
@@ -615,13 +666,16 @@ async function runRepetition(
       groundTruth,
       watchers.gravelState.lastUpdateReceived,
       watchers.gravelState.lastUpdateWasNoop,
+      "gravel",
     );
+
     const oldWatchQueryOutcome = classifyOutcome(
       oldWatchQueryStateBefore,
       oldWatchQueryStateAfter,
       groundTruth,
       watchers.oldWatchQueryState.lastUpdateReceived,
       watchers.oldWatchQueryState.lastUpdateWasNoop,
+      "oldWatchQuery",
     );
 
     addToMatrix(gravelMatrix, gravelOutcome);
@@ -632,15 +686,23 @@ async function runRepetition(
     const groundTruthChanged =
       JSON.stringify(gravelStateBefore) !== JSON.stringify(groundTruth);
 
-    // Calculate latencies: time from update issued to watcher response (clamped at 0ms)
+    // Latency: total time from before write to watcher response, minus the write duration
+    // This isolates change stream propagation + processing time
     const gravelLatencyMs = watchers.gravelState.lastUpdateTimestamp
-      ? Math.max(0, watchers.gravelState.lastUpdateTimestamp - updateIssuedTime)
+      ? Math.max(
+          0,
+          watchers.gravelState.lastUpdateTimestamp -
+            updateIssuedTime -
+            writeDurationMs,
+        )
       : 0;
     const oldWatchQueryLatencyMs = watchers.oldWatchQueryState
       .lastUpdateTimestamp
       ? Math.max(
           0,
-          watchers.oldWatchQueryState.lastUpdateTimestamp - updateIssuedTime,
+          watchers.oldWatchQueryState.lastUpdateTimestamp -
+            updateIssuedTime -
+            writeDurationMs,
         )
       : 0;
 
@@ -699,6 +761,10 @@ async function runRepetition(
     }
   }
 
+  // Fetch DB query counts before stopping watchers
+  const gravelDbQueries = await watchers.getGravelDbQueryCount();
+  const oldWatchQueryDbQueries = getAndResetDbQueryCount();
+
   await watchers.stopWatching();
 
   const endTime = Date.now();
@@ -715,6 +781,8 @@ async function runRepetition(
     gravelTotalUpdateBytes: watchers.gravelState.totalUpdateBytes,
     oldWatchQueryTotalUpdateBytes: watchers.oldWatchQueryState.totalUpdateBytes,
     groundTruthTotalBytes,
+    gravelDbQueries,
+    oldWatchQueryDbQueries,
   };
 }
 
@@ -889,6 +957,12 @@ export async function runExperimentSuite(
         avgGravelTotalBytes,
         avgOldWatchQueryTotalBytes,
         avgGroundTruthTotalBytes,
+        avgGravelDbQueries:
+          repetitions.reduce((sum, r) => sum + r.gravelDbQueries, 0) /
+          repetitions.length,
+        avgOldWatchQueryDbQueries:
+          repetitions.reduce((sum, r) => sum + r.oldWatchQueryDbQueries, 0) /
+          repetitions.length,
       });
       updateAggregatedMatrices();
 

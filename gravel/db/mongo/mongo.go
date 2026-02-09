@@ -2,7 +2,6 @@ package mongo
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"gravel/types"
 	"log"
@@ -10,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -25,6 +25,17 @@ type MongoProvider struct {
 	mu            sync.RWMutex
 	MongoUrl      string
 	DatabaseName  string
+	queryCount    int64
+}
+
+// IncrementQueryCount atomically increments the query counter
+func (m *MongoProvider) IncrementQueryCount() {
+	atomic.AddInt64(&m.queryCount, 1)
+}
+
+// GetAndResetQueryCount atomically reads and resets the query counter
+func (m *MongoProvider) GetAndResetQueryCount() int64 {
+	return atomic.SwapInt64(&m.queryCount, 0)
 }
 
 // extractDatabaseFromURL extracts the database name from a MongoDB URL
@@ -155,6 +166,7 @@ func (m *MongoProvider) Query(collection string, query string, findOptionsStr st
 // QueryWithEvent runs a query with optional snapshot read concern at a specific cluster time
 // If event.ClusterTime is provided, the query will use snapshot read concern at that specific point in time
 func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChangeStreamEvent, collection string, query string, findOptionsStr string) []types.Document {
+	m.IncrementQueryCount()
 
 	if m.client == nil {
 		log.Printf("MongoDB client not connected, cannot execute query")
@@ -175,10 +187,12 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 	if query == "" {
 		filter = bson.M{}
 	} else {
-		if err := json.Unmarshal([]byte(query), &filter); err != nil {
+		parsed, err := parseQueryString(query)
+		if err != nil {
 			log.Printf("Failed to parse query string: %v", err)
 			return nil
 		}
+		filter = parsed
 	}
 
 	findOptions, err := parseFindOptionsString(findOptionsStr)
@@ -244,6 +258,8 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 		return nil
 	}
 
+	log.Print("Executing query without snapshot read concern %v", filter)
+
 	// Regular query without snapshot read concern
 	cursor, err = coll.Find(ctx, filter, &findOptions)
 	if err != nil {
@@ -257,6 +273,7 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 	docCount := 0
 	for cursor.Next(ctx) {
 		var doc bson.M
+		log.Print("Executing query without snapshot read concern %v", doc)
 		if err := cursor.Decode(&doc); err != nil {
 			log.Printf("Failed to decode document: %v", err)
 			continue
@@ -447,13 +464,17 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 			// Extract full document (available for insert, update, replace operations)
 			var fullDocument interface{}
 			if fullDoc, exists := changeEvent["fullDocument"]; exists {
+
 				fullDocument = fullDoc
+
 			}
 
 			// Extract full document before change (pre-image, available when enabled)
 			var fullDocumentBeforeChange interface{}
 			if preImage, exists := changeEvent["fullDocumentBeforeChange"]; exists {
+
 				fullDocumentBeforeChange = preImage
+
 			}
 
 			// Extract clusterTime timestamp from the change event
@@ -562,6 +583,9 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 	}
 
 	// Extract relevant fields from projection. which should be every key existing in the projection
+	if findOptions.Projection == nil {
+		queryInformation.NoProjection = true
+	}
 	queryInformation.ProjectionFields = flattenObject(findOptions.Projection)
 
 	// add _id if not present so we track it. _id is always present in the returning data regardless of projection. we mimic this behavior here

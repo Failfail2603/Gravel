@@ -1,5 +1,6 @@
 import patch, { type Operation } from "fast-json-patch";
 import type { FindOptions } from "mongodb";
+import { connect, type NatsConnection } from "nats";
 import type { Subscription } from "rxjs";
 import { getGravelConnection, GravelDBs } from "../gravel.js";
 import { MONGO_URL } from "./config.js";
@@ -33,6 +34,7 @@ export interface ExperimentWatchers {
     options: FindOptions,
   ) => Promise<void>;
   stopWatching: () => Promise<void>;
+  drainStaleEvents: () => Promise<void>;
   waitForUpdates: (timeoutMs?: number) => Promise<void>;
   resetUpdateFlags: () => void;
   getGroundTruth: (
@@ -40,10 +42,12 @@ export interface ExperimentWatchers {
     query: Record<string, any>,
     options: FindOptions,
   ) => Promise<any[]>;
+  getGravelDbQueryCount: () => Promise<number>;
 }
 
 let gravel: Awaited<ReturnType<typeof getGravelConnection>> | null = null;
 let gravelMongoClient: any = null;
+let metricsNatsConnection: NatsConnection | null = null;
 let stopGravelWatchQuery: (() => Promise<void>) | null = null;
 let gravelSubscription: Subscription | null = null;
 let oldWatchQuerySubscription: Subscription | null = null;
@@ -139,9 +143,6 @@ async function startWatching(
     gravelState.lastUpdateTimestamp = Date.now();
 
     // Track bytes for this update
-    const updateBytes = Buffer.byteLength(JSON.stringify(patches), "utf-8");
-    gravelState.lastUpdateBytes = updateBytes;
-    gravelState.totalUpdateBytes += updateBytes;
 
     if (patches.length > 0) {
       // Apply patches to current data
@@ -149,6 +150,9 @@ async function startWatching(
       const patchResult = patch.applyPatch(currentDoc, patches, false, false);
       gravelState.currentData = patchResult.newDocument.result;
       gravelState.lastUpdateWasNoop = false;
+      const updateBytes = Buffer.byteLength(JSON.stringify(patches), "utf-8");
+      gravelState.lastUpdateBytes = updateBytes;
+      gravelState.totalUpdateBytes += updateBytes;
     } else {
       // If patches.length === 0, it's a noop - data stays the same
       gravelState.lastUpdateWasNoop = true;
@@ -180,9 +184,7 @@ async function startWatching(
           JSON.stringify(data),
           "utf-8",
         );
-        console.log(
-          `OldWatchQuery initial data: ${data.length} documents (${oldWatchQueryState.initialBytes} bytes)`,
-        );
+
         isFirstEmit = false;
       } else {
         // Always mark that we received an update (even if noop)
@@ -193,7 +195,6 @@ async function startWatching(
         // Check if this is a noop change
         if (data === NOOP_CHANGE) {
           // Change was filtered out - don't update data
-          console.log(`OldWatchQuery noop change`);
           oldWatchQueryState.lastUpdateWasNoop = true;
           oldWatchQueryState.lastUpdateBytes = 0;
           // Data stays the same for noops
@@ -202,6 +203,7 @@ async function startWatching(
           const updateBytes = Buffer.byteLength(JSON.stringify(data), "utf-8");
           oldWatchQueryState.lastUpdateBytes = updateBytes;
           oldWatchQueryState.totalUpdateBytes += updateBytes;
+
           oldWatchQueryState.currentData = data;
           oldWatchQueryState.lastUpdateWasNoop = false;
         }
@@ -269,7 +271,7 @@ async function waitForUpdates(timeoutMs: number = 5000): Promise<void> {
           oldWatchQueryUpdateResolver();
           oldWatchQueryUpdateResolver = null;
         }
-      }, 1000); // Give it 1 second to respond
+      }, 3000); // Give it 3 seconds to respond (concatMap serialization + throttleTime(500ms) can exceed 1s)
     }
   });
 
@@ -278,6 +280,36 @@ async function waitForUpdates(timeoutMs: number = 5000): Promise<void> {
     Promise.all([gravelPromise, oldWatchQueryPromise]),
     new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
   ]);
+}
+
+async function drainStaleEvents(): Promise<void> {
+  console.log(
+    `[OldWQ] drainStaleEvents: waiting for change stream to settle...`,
+  );
+  let lastUpdateCount = oldWatchQueryState.updateCount;
+  // Wait until no new events arrive for 500ms
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (oldWatchQueryState.updateCount === lastUpdateCount) {
+      break;
+    }
+    console.log(
+      `[OldWQ] drainStaleEvents: still draining (updateCount ${lastUpdateCount} -> ${oldWatchQueryState.updateCount})`,
+    );
+    lastUpdateCount = oldWatchQueryState.updateCount;
+  }
+  console.log(
+    `[OldWQ] drainStaleEvents: settled after ${oldWatchQueryState.updateCount} stale events`,
+  );
+  // Reset state so stale events don't affect the experiment
+  oldWatchQueryState.lastUpdateReceived = false;
+  oldWatchQueryState.lastUpdateTimestamp = null;
+  oldWatchQueryState.lastUpdateWasNoop = false;
+  oldWatchQueryState.lastUpdateBytes = 0;
+  gravelState.lastUpdateReceived = false;
+  gravelState.lastUpdateTimestamp = null;
+  gravelState.lastUpdateWasNoop = false;
+  gravelState.lastUpdateBytes = 0;
 }
 
 function resetUpdateFlags(): void {
@@ -314,16 +346,47 @@ async function getGroundTruth(
     cursor = cursor.project(options.projection);
   }
 
-  return cursor.toArray();
+  const result = await cursor.toArray();
+  result.forEach((entry) => {
+    entry._id = entry._id.toString();
+  });
+
+  return result;
 }
 
 export async function closeWatchers(): Promise<void> {
   await stopWatching();
 
+  if (metricsNatsConnection) {
+    await metricsNatsConnection.drain();
+    metricsNatsConnection = null;
+  }
+
   if (gravel) {
     await gravel.close();
     gravel = null;
     gravelMongoClient = null;
+  }
+}
+
+async function getGravelDbQueryCount(): Promise<number> {
+  if (!metricsNatsConnection) {
+    metricsNatsConnection = await connect();
+  }
+  if (!gravelMongoClient) {
+    return 0;
+  }
+  try {
+    const response = await metricsNatsConnection.request(
+      "gravel.metrics.querycount",
+      JSON.stringify({ clientID: gravelMongoClient.clientID }),
+      { timeout: 5000 },
+    );
+    const data = JSON.parse(Buffer.from(response.data).toString("utf-8"));
+    return data.count ?? 0;
+  } catch (err) {
+    console.error("Failed to fetch Gravel DB query count:", err);
+    return 0;
   }
 }
 
@@ -333,9 +396,11 @@ export function createExperimentWatchers(): ExperimentWatchers {
     oldWatchQueryState,
     startWatching,
     stopWatching,
+    drainStaleEvents,
     waitForUpdates,
     resetUpdateFlags,
     getGroundTruth,
+    getGravelDbQueryCount,
   };
 }
 
@@ -348,13 +413,14 @@ export function classifyOutcome(
   groundTruth: any[],
   receivedUpdate: boolean,
   wasNoop: boolean,
+  algorithm: "gravel" | "oldWatchQuery",
 ): "TP" | "TN" | "FP" | "FN" {
   // Did the ground truth actually change?
-  const groundTruthChanged = !arraysEqual(stateBefore, groundTruth);
+  const groundTruthChanged = !arraysEqual(stateBefore, groundTruth, algorithm);
 
   if (groundTruthChanged && !wasNoop) {
     // Check if the update was correct
-    if (arraysEqual(stateAfter, groundTruth)) {
+    if (arraysEqual(stateAfter, groundTruth, algorithm)) {
       return "TP"; // Correctly reported change
     } else {
       return "FP"; // Reported change but got wrong result (still counts as FP - incorrect update)
@@ -370,29 +436,24 @@ export function classifyOutcome(
   }
 }
 
-function deepEqual(obj1: any, obj2: any, path = "") {
+function deepEqual(
+  obj1: any,
+  obj2: any,
+  path = "",
+  algorithm: "gravel" | "oldWatchQuery",
+) {
   // Handle strict equality (primitives, same reference)
   if (obj1 === obj2) return true;
 
   // Handle null/undefined
   if (obj1 == null || obj2 == null) {
-    if (obj1 !== obj2) {
-      console.log(
-        `[deepEqual] Null/undefined mismatch at ${path}:`,
-        obj1,
-        "vs",
-        obj2,
-      );
-    }
     return false;
   }
 
   // Handle Date objects
   if (obj1 instanceof Date && obj2 instanceof Date) {
     const equal = obj1.getTime() === obj2.getTime();
-    if (!equal) {
-      console.log(`[deepEqual] Date mismatch at ${path}:`, obj1, "vs", obj2);
-    }
+
     return equal;
   }
 
@@ -401,14 +462,7 @@ function deepEqual(obj1: any, obj2: any, path = "") {
     const date2 = new Date(obj2);
     if (!isNaN(date2.getTime())) {
       const equal = obj1.getTime() === date2.getTime();
-      if (!equal) {
-        console.log(
-          `[deepEqual] Date vs string mismatch at ${path}:`,
-          obj1,
-          "vs",
-          obj2,
-        );
-      }
+
       return equal;
     }
   }
@@ -417,14 +471,7 @@ function deepEqual(obj1: any, obj2: any, path = "") {
     const date1 = new Date(obj1);
     if (!isNaN(date1.getTime())) {
       const equal = date1.getTime() === obj2.getTime();
-      if (!equal) {
-        console.log(
-          `[deepEqual] String vs Date mismatch at ${path}:`,
-          obj1,
-          "vs",
-          obj2,
-        );
-      }
+
       return equal;
     }
   }
@@ -442,19 +489,7 @@ function deepEqual(obj1: any, obj2: any, path = "") {
         // Only compare as dates if both are valid dates
         if (!isNaN(date1.getTime()) && !isNaN(date2.getTime())) {
           const equal = date1.getTime() === date2.getTime();
-          if (!equal) {
-            console.log(
-              `[deepEqual] Date string mismatch at ${path}:`,
-              obj1,
-              "vs",
-              obj2,
-              "(timestamps:",
-              date1.getTime(),
-              "vs",
-              date2.getTime(),
-              ")",
-            );
-          }
+
           return equal;
         }
       }
@@ -463,7 +498,7 @@ function deepEqual(obj1: any, obj2: any, path = "") {
     const equal = obj1 === obj2;
     if (!equal) {
       console.log(
-        `[deepEqual] Primitive mismatch at ${path}:`,
+        `[deepEqual - ${algorithm}] Primitive mismatch at ${path}:`,
         obj1,
         "vs",
         obj2,
@@ -476,7 +511,7 @@ function deepEqual(obj1: any, obj2: any, path = "") {
   if (Array.isArray(obj1) && Array.isArray(obj2)) {
     if (obj1.length !== obj2.length) {
       console.log(
-        `[deepEqual] Array length mismatch at ${path}:`,
+        `[deepEqual - ${algorithm}] Array length mismatch at ${path}:`,
         obj1.length,
         "vs",
         obj2.length,
@@ -486,8 +521,10 @@ function deepEqual(obj1: any, obj2: any, path = "") {
 
     // Recursively compare each element (handles nested objects, arrays, dates)
     for (let i = 0; i < obj1.length; i++) {
-      if (!deepEqual(obj1[i], obj2[i], `${path}[${i}]`)) {
-        console.log(`[deepEqual] Array element mismatch at ${path}[${i}]`);
+      if (!deepEqual(obj1[i], obj2[i], `${path}[${i}]`, algorithm)) {
+        console.log(
+          `[deepEqual - ${algorithm}] Array element mismatch at ${path}[${i}]`,
+        );
         return false;
       }
     }
@@ -497,7 +534,7 @@ function deepEqual(obj1: any, obj2: any, path = "") {
   // One is array, other is not
   if (Array.isArray(obj1) !== Array.isArray(obj2)) {
     console.log(
-      `[deepEqual] Type mismatch at ${path}: one is array, other is not`,
+      `[deepEqual - ${algorithm}] Type mismatch at ${path}: one is array, other is not`,
     );
     return false;
   }
@@ -509,35 +546,26 @@ function deepEqual(obj1: any, obj2: any, path = "") {
   // Different number of properties
   if (keys1.length !== keys2.length) {
     console.log(
-      `[deepEqual] Object keys count mismatch at ${path}:`,
+      `[deepEqual - ${algorithm}] Object keys count mismatch at ${path}:`,
       keys1.length,
       "vs",
       keys2.length,
     );
-    console.log(`[deepEqual] Keys1:`, keys1);
-    console.log(`[deepEqual] Keys2:`, keys2);
+    console.log(`[deepEqual - ${algorithm}] Keys1:`, keys1);
+    console.log(`[deepEqual - ${algorithm}] Keys2:`, keys2);
     return false;
   }
 
   // Check all keys match
   for (let i = 0; i < keys1.length; i++) {
     if (keys1[i] !== keys2[i]) {
-      console.log(
-        `[deepEqual] Key mismatch at ${path}:`,
-        keys1[i],
-        "vs",
-        keys2[i],
-      );
-      console.log(`[deepEqual] All keys1:`, keys1);
-      console.log(`[deepEqual] All keys2:`, keys2);
       return false;
     }
   }
 
   // Recursively compare all property values
   for (const key of keys1) {
-    if (!deepEqual(obj1[key], obj2[key], `${path}.${key}`)) {
-      console.log(`[deepEqual] Property value mismatch at ${path}.${key}`);
+    if (!deepEqual(obj1[key], obj2[key], `${path}.${key}`, algorithm)) {
       return false;
     }
   }
@@ -546,7 +574,11 @@ function deepEqual(obj1: any, obj2: any, path = "") {
 }
 
 // Helper function to compare arrays for equality
-function arraysEqual(a: any[], b: any[]): boolean {
+function arraysEqual(
+  a: any[],
+  b: any[],
+  algorithm: "gravel" | "oldWatchQuery",
+): boolean {
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
   if (a.length !== b.length) return false;
 
@@ -568,7 +600,7 @@ function arraysEqual(a: any[], b: any[]): boolean {
       typeof sortedB[i]._id === "object"
         ? sortedB[i]._id.toString()
         : sortedB[i]._id;
-    if (!deepEqual(sortedA[i], sortedB[i])) {
+    if (!deepEqual(sortedA[i], sortedB[i], "", algorithm)) {
       return false;
     }
   }

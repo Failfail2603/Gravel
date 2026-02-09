@@ -100,6 +100,7 @@ type Document map[string]interface{}
 
 // QueryAnalysis contains analysis information about a query
 type QueryAnalysis struct {
+	// the projected fields of the query
 	ProjectionFields []string
 	FilterFields     []string
 	SortFields       []SortField
@@ -108,6 +109,9 @@ type QueryAnalysis struct {
 	// should be skip + limit
 	WindowEnd   int
 	WindowLimit int
+
+	// no projection given. This means everything is projected automatically
+	NoProjection bool
 }
 
 // DebugMessage represents a debug message

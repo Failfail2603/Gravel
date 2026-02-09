@@ -2,7 +2,7 @@ import express, { type Request, type Response } from "express";
 import type { Operation } from "fast-json-patch";
 import patch from "fast-json-patch";
 import path from "path";
-import type { Subscription } from "rxjs";
+import { type Subscription } from "rxjs";
 import { fileURLToPath } from "url";
 import { getGravelConnection, GravelDBs } from "../gravel.js";
 import { experimentQueries, MONGO_URL } from "./config.js";
