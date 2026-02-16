@@ -49,6 +49,7 @@ export interface UpdateMetric {
   durationMs: number;
   gravelLatencyMs: number;
   oldWatchQueryLatencyMs: number;
+  naiveLatencyMs: number;
   gravelUpdateBytes: number;
   oldWatchQueryUpdateBytes: number;
   groundTruthBytes: number;
@@ -122,7 +123,7 @@ export interface LiveExperimentState {
     oldWatchQueryMatrix: [number, number, number, number]; // [TP, TN, FP, FN]
     avgGravelLatencyMs: number;
     avgOldWatchQueryLatencyMs: number;
-    avgGroundTruthLatencyMs: number;
+    avgNaiveLatencyMs: number;
     avgGravelTotalBytes: number;
     avgOldWatchQueryTotalBytes: number;
     avgGroundTruthTotalBytes: number;
@@ -138,11 +139,12 @@ export interface LiveExperimentState {
   lastOldWatchQueryOutcome: string;
   lastGravelLatencyMs: number;
   lastOldWatchQueryLatencyMs: number;
+  lastNaiveLatencyMs: number;
   latencyHistory: {
     updateNumber: number;
     gravelLatencyMs: number;
     oldWatchQueryLatencyMs: number;
-    groundTruthLatencyMs: number;
+    naiveLatencyMs: number;
   }[];
   error: string | null;
 }
@@ -174,6 +176,7 @@ function createInitialLiveState(): LiveExperimentState {
     lastOldWatchQueryOutcome: "",
     lastGravelLatencyMs: 0,
     lastOldWatchQueryLatencyMs: 0,
+    lastNaiveLatencyMs: 0,
     latencyHistory: [],
     error: null,
   };
@@ -215,6 +218,7 @@ function writeQueryResultsToCSV(
     "duration_ms",
     "gravel_latency_ms",
     "old_watchquery_latency_ms",
+    "naive_latency_ms",
     "gravel_update_bytes",
     "old_watchquery_update_bytes",
     "ground_truth_bytes",
@@ -237,6 +241,7 @@ function writeQueryResultsToCSV(
         metric.durationMs,
         metric.gravelLatencyMs,
         metric.oldWatchQueryLatencyMs,
+        metric.naiveLatencyMs,
         metric.gravelUpdateBytes,
         metric.oldWatchQueryUpdateBytes,
         metric.groundTruthBytes,
@@ -261,7 +266,9 @@ function writeQueryResultsToCSV(
   const summaryRows: string[] = [summaryHeader];
   let avgGravelTotal = 0,
     avgOldTotal = 0,
-    avgGroundTruth = 0;
+    avgGroundTruth = 0,
+    avgGravelDbQueries = 0,
+    avgOldDbQueries = 0;
 
   for (const rep of repetitions) {
     const gravelTotal = rep.gravelInitialBytes + rep.gravelTotalUpdateBytes;
@@ -271,6 +278,8 @@ function writeQueryResultsToCSV(
     avgGravelTotal += gravelTotal;
     avgOldTotal += oldTotal;
     avgGroundTruth += rep.groundTruthTotalBytes;
+    avgGravelDbQueries += rep.gravelDbQueries;
+    avgOldDbQueries += rep.oldWatchQueryDbQueries;
 
     const summaryRow = [
       rep.repetitionNumber,
@@ -290,6 +299,8 @@ function writeQueryResultsToCSV(
     (avgGravelTotal / count).toFixed(2),
     (avgOldTotal / count).toFixed(2),
     (avgGroundTruth / count).toFixed(2),
+    (avgGravelDbQueries / count).toFixed(2),
+    (avgOldDbQueries / count).toFixed(2),
   ].join(",");
   summaryRows.push(avgRow);
 
@@ -420,22 +431,7 @@ async function getRandomDocument(
 async function performRandomUpdate(
   collection: any,
   totalUsers: number,
-  forceTargetId?: ObjectId,
 ): Promise<{ operationType: string }> {
-  if (forceTargetId) {
-    const bulkOps = [
-      {
-        updateOne: {
-          filter: { _id: forceTargetId },
-          update: { $set: generateRandomUpdateFields() },
-        },
-      },
-    ];
-
-    await collection.bulkWrite(bulkOps, { ordered: false });
-    return { operationType: "update" };
-  }
-
   const targetSize = DEFAULT_COLLECTION_SIZE;
   const sizeDelta = totalUsers - targetSize;
 
@@ -610,10 +606,6 @@ async function runRepetition(
 
   console.log(`    Running ${updatesPerQuery} updates...`);
 
-  const guaranteedHitId = isSingleIdQuery(queryForRepetition)
-    ? queryForRepetition._id
-    : undefined;
-
   for (let i = 0; i < updatesPerQuery; i++) {
     if (stopRequested) {
       console.log("    Stopping due to user request...");
@@ -632,11 +624,7 @@ async function runRepetition(
     const updateStartTime = Date.now();
     const totalUsers = await collection.countDocuments({});
     const updateIssuedTime = Date.now();
-    const { operationType } = await performRandomUpdate(
-      collection,
-      totalUsers,
-      i === 0 ? guaranteedHitId : undefined,
-    );
+    const { operationType } = await performRandomUpdate(collection, totalUsers);
     // Subtract the write duration to isolate propagation + processing time
     const writeDurationMs = Date.now() - updateIssuedTime;
 
@@ -648,7 +636,7 @@ async function runRepetition(
       queryForRepetition,
       options,
     );
-    const groundTruthLatencyMs = Date.now() - groundTruthStartTime;
+    const naiveLatencyMs = Date.now() - groundTruthStartTime;
     const groundTruthBytes = Buffer.byteLength(
       JSON.stringify(groundTruth),
       "utf-8",
@@ -718,6 +706,7 @@ async function runRepetition(
       durationMs: updateEndTime - updateStartTime,
       gravelLatencyMs,
       oldWatchQueryLatencyMs,
+      naiveLatencyMs,
       gravelUpdateBytes: watchers.gravelState.lastUpdateBytes,
       oldWatchQueryUpdateBytes: watchers.oldWatchQueryState.lastUpdateBytes,
       groundTruthBytes,
@@ -731,13 +720,14 @@ async function runRepetition(
     liveState.lastOldWatchQueryOutcome = oldWatchQueryOutcome;
     liveState.lastGravelLatencyMs = gravelLatencyMs;
     liveState.lastOldWatchQueryLatencyMs = oldWatchQueryLatencyMs;
+    liveState.lastNaiveLatencyMs = naiveLatencyMs;
 
     // Add to latency history for graphing (keep last 500 points)
     liveState.latencyHistory.push({
       updateNumber: i + 1,
       gravelLatencyMs,
       oldWatchQueryLatencyMs,
-      groundTruthLatencyMs,
+      naiveLatencyMs,
     });
     if (liveState.latencyHistory.length > 500) {
       liveState.latencyHistory.shift();
@@ -919,11 +909,11 @@ export async function runExperimentSuite(
               r.metrics.length,
           0,
         ) / repetitions.length;
-      const avgGroundTruthLatencyMs =
+      const avgNaiveLatencyMs =
         repetitions.reduce(
           (sum, r) =>
             sum +
-            r.metrics.reduce((s, m) => s + m.groundTruthBytes, 0) /
+            r.metrics.reduce((s, m) => s + m.naiveLatencyMs, 0) /
               r.metrics.length,
           0,
         ) / repetitions.length;
@@ -953,7 +943,7 @@ export async function runExperimentSuite(
         oldWatchQueryMatrix: matrixToArray(aggregatedOldWatchQueryMatrix),
         avgGravelLatencyMs,
         avgOldWatchQueryLatencyMs,
-        avgGroundTruthLatencyMs,
+        avgNaiveLatencyMs,
         avgGravelTotalBytes,
         avgOldWatchQueryTotalBytes,
         avgGroundTruthTotalBytes,

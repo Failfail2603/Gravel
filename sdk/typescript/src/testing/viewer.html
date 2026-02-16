@@ -536,6 +536,10 @@
             <div class="stat-value" id="oldLatency">-</div>
             <div class="stat-label">Old Latency</div>
           </div>
+          <div class="stat-item">
+            <div class="stat-value" id="naiveLatency">-</div>
+            <div class="stat-label">Naive Latency</div>
+          </div>
         </div>
       </div>
 
@@ -825,6 +829,8 @@
             `${state.lastGravelLatencyMs}ms`;
           document.getElementById("oldLatency").textContent =
             `${state.lastOldWatchQueryLatencyMs}ms`;
+          document.getElementById("naiveLatency").textContent =
+            `${state.lastNaiveLatencyMs}ms`;
 
           // Use server-provided aggregated matrices (arrays: [TP, TN, FP, FN])
           const gravelMatrix = state.aggregatedGravelMatrix || [0, 0, 0, 0];
@@ -911,6 +917,16 @@
                   pointRadius: 2,
                   pointHoverRadius: 4,
                 },
+                {
+                  label: "Naive Latency",
+                  data: [],
+                  borderColor: "#4dabf7",
+                  backgroundColor: "rgba(77, 171, 247, 0.1)",
+                  borderWidth: 2,
+                  tension: 0.1,
+                  pointRadius: 2,
+                  pointHoverRadius: 4,
+                },
               ],
             },
             options: {
@@ -964,6 +980,9 @@
         );
         latencyChart.data.datasets[1].data = state.latencyHistory.map(
           (d) => d.oldWatchQueryLatencyMs,
+        );
+        latencyChart.data.datasets[2].data = state.latencyHistory.map(
+          (d) => d.naiveLatencyMs,
         );
         latencyChart.update("none");
       }
@@ -1020,6 +1039,8 @@
                     <span style="color: #51cf66; font-weight: 600;">${(q.avgGravelLatencyMs || 0).toFixed(1)}ms</span>
                     <span style="color: #666; margin: 0 4px;">vs</span>
                     <span style="color: #ffd43b; font-weight: 600;">${(q.avgOldWatchQueryLatencyMs || 0).toFixed(1)}ms</span>
+                    <span style="color: #666; margin: 0 4px;">vs</span>
+                    <span style="color: #4dabf7; font-weight: 600;">${(q.avgNaiveLatencyMs || 0).toFixed(1)}ms</span>
                   </div>
                 </div>
                 <div style="text-align: center;">

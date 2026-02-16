@@ -20,6 +20,7 @@ interface UpdateMetric {
   durationMs: number;
   gravelLatencyMs: number;
   oldWatchQueryLatencyMs: number;
+  naiveLatencyMs: number;
 }
 
 interface RepetitionResult {
@@ -114,6 +115,7 @@ function metricsToCSV(metrics: UpdateMetric[]): string {
     "durationMs",
     "gravelLatencyMs",
     "oldWatchQueryLatencyMs",
+    "naiveLatencyMs",
   ];
 
   const rows: string[] = [headers.join(",")];
@@ -131,6 +133,7 @@ function metricsToCSV(metrics: UpdateMetric[]): string {
         m.durationMs,
         m.gravelLatencyMs,
         m.oldWatchQueryLatencyMs,
+        m.naiveLatencyMs,
       ].join(","),
     );
   }
@@ -213,6 +216,17 @@ function experimentSummaryToCSV(result: ExperimentResult): string {
   const gravelMetrics = calculateMetrics(result.totalGravelMatrix);
   const oldMetrics = calculateMetrics(result.totalOldWatchQueryMatrix);
 
+  const allRepetitions = result.queryResults.flatMap((q) => q.repetitions);
+  const repCount = allRepetitions.length || 1;
+  const avgGravelDbQueries =
+    allRepetitions.reduce((sum, r) => sum + (r.gravelDbQueries || 0), 0) /
+    repCount;
+  const avgOldDbQueries =
+    allRepetitions.reduce(
+      (sum, r) => sum + (r.oldWatchQueryDbQueries || 0),
+      0,
+    ) / repCount;
+
   const lines = [
     "Experiment Summary",
     `experimentId,${result.experimentId}`,
@@ -222,6 +236,8 @@ function experimentSummaryToCSV(result: ExperimentResult): string {
     `collectionSize,${result.collectionSize}`,
     `totalQueries,${result.queryResults.length}`,
     `totalDurationMs,${result.endTime - result.startTime}`,
+    `avgGravelDbQueries,${avgGravelDbQueries.toFixed(2)}`,
+    `avgOldWatchQueryDbQueries,${avgOldDbQueries.toFixed(2)}`,
     "",
     "Total Confusion Matrices",
     "system,truePositive,trueNegative,falsePositive,falseNegative,accuracy,precision,recall,f1Score",
