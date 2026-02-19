@@ -7,7 +7,7 @@ export const USE_BULK_OPERATIONS = true;
 
 // Experiment configuration
 export const UPDATES_PER_QUERY = 1000;
-export const REPETITIONS_PER_QUERY = 3;
+export const REPETITIONS_PER_QUERY = 1;
 export const DEFAULT_EXPERIMENT_SEED = 123456789;
 export const DEFAULT_COLLECTION_SIZE = 500000;
 

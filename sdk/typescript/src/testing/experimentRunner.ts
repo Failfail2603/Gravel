@@ -27,7 +27,10 @@ import {
 } from "./experimentWatchers.js";
 import { getMongoClient } from "./mongoClient.js";
 import { getAndResetDbQueryCount } from "./oldWatchQuery.js";
-import { resetRandomGenerators } from "./randomGenerator.js";
+import {
+  installSeededMathRandom,
+  resetRandomGenerators,
+} from "./randomGenerator.js";
 import { regenerateDatabase } from "./regenerateDatabase.js";
 
 export interface ExperimentConfig {
@@ -428,6 +431,18 @@ async function getRandomDocument(
   return docs.length > 0 ? docs[0] : null;
 }
 
+async function performTargetedSingleIdUpdate(
+  collection: any,
+  targetId: ObjectId,
+): Promise<boolean> {
+  const updateFields = generateRandomUpdateFields();
+  const result = await collection.updateOne(
+    { _id: targetId },
+    { $set: updateFields },
+  );
+  return (result?.matchedCount || 0) > 0;
+}
+
 async function performRandomUpdate(
   collection: any,
   totalUsers: number,
@@ -624,7 +639,26 @@ async function runRepetition(
     const updateStartTime = Date.now();
     const totalUsers = await collection.countDocuments({});
     const updateIssuedTime = Date.now();
-    const { operationType } = await performRandomUpdate(collection, totalUsers);
+    const shouldTargetSingleIdUpdate =
+      isSingleIdQuery(queryForRepetition) && Math.random() < 0.5;
+
+    let operationType = "update";
+    if (shouldTargetSingleIdUpdate) {
+      const didTargetedUpdate = await performTargetedSingleIdUpdate(
+        collection,
+        queryForRepetition._id,
+      );
+      if (didTargetedUpdate) {
+        operationType = "targeted_update";
+      } else {
+        // Fallback if the target doc no longer exists.
+        const randomUpdate = await performRandomUpdate(collection, totalUsers);
+        operationType = randomUpdate.operationType;
+      }
+    } else {
+      const randomUpdate = await performRandomUpdate(collection, totalUsers);
+      operationType = randomUpdate.operationType;
+    }
     // Subtract the write duration to isolate propagation + processing time
     const writeDurationMs = Date.now() - updateIssuedTime;
 
@@ -816,6 +850,8 @@ export async function runExperimentSuite(
   console.log("=".repeat(70));
 
   const queryResults: QueryResult[] = [];
+
+  installSeededMathRandom();
 
   try {
     for (let qi = 0; qi < experimentQueries.length; qi++) {
