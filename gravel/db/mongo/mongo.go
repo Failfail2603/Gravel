@@ -33,6 +33,11 @@ func (m *MongoProvider) IncrementQueryCount() {
 	atomic.AddInt64(&m.queryCount, 1)
 }
 
+// IncrementQueryCount atomically increments the query counter
+func (m *MongoProvider) DecrementQueryCount() {
+	atomic.AddInt64(&m.queryCount, -1)
+}
+
 // GetAndResetQueryCount atomically reads and resets the query counter
 func (m *MongoProvider) GetAndResetQueryCount() int64 {
 	return atomic.SwapInt64(&m.queryCount, 0)

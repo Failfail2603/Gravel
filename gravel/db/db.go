@@ -34,6 +34,7 @@ type DBProvider interface {
 	GetPositionForDocumentInWindow(documents []types.WatchedDocument, document types.WatchedDocument, sortFields []types.SortField) int
 	ProjectDocument(document types.Document, options string, nestedPath string) (types.Document, error)
 	GetAndResetQueryCount() int64
+	DecrementQueryCount()
 }
 
 type DBService struct {

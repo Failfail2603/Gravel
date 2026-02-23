@@ -26,8 +26,15 @@ export async function regenerateDatabase(
 
   // Clear existing data
   console.log(`Clearing existing data from "${collectionName}"...`);
+  console.log(`Dropping existing indexes on "${collectionName}"...`);
+  await collection.dropIndexes();
+  console.log("Indexes dropped.");
   await collection.deleteMany({});
   console.log("Collection cleared.");
+
+  console.log(`Creating index on "${collectionName}.debitor"...`);
+  await collection.createIndex({ debitor: 1 });
+  console.log("Index created.");
 
   // Generate documents
   console.log(`Generating ${count} documents...`);

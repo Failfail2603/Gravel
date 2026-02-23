@@ -12,15 +12,14 @@ interface ConfusionMatrix {
 interface UpdateMetric {
   updateNumber: number;
   operationType: string;
-  groundTruthChanged: boolean;
   gravelOutcome: "TP" | "TN" | "FP" | "FN";
   oldWatchQueryOutcome: "TP" | "TN" | "FP" | "FN";
-  gravelCorrect: boolean;
-  oldWatchQueryCorrect: boolean;
-  durationMs: number;
   gravelLatencyMs: number;
   oldWatchQueryLatencyMs: number;
   naiveLatencyMs: number;
+  gravelDbReads: number;
+  oldWatchQueryDbReads: number;
+  naiveDbReads: number;
 }
 
 interface RepetitionResult {
@@ -85,18 +84,6 @@ export async function saveExperimentToCSV(
     }
   }
 
-  // Save confusion matrix summary per query
-  const queryMatrixFile = path.join(expDir, "query_confusion_matrices.csv");
-  const queryMatrixContent = queryConfusionMatricesToCSV(result);
-  fs.writeFileSync(queryMatrixFile, queryMatrixContent, "utf-8");
-  savedFiles.push(queryMatrixFile);
-
-  // Save experiment summary
-  const summaryFile = path.join(expDir, "experiment_summary.csv");
-  const summaryContent = experimentSummaryToCSV(result);
-  fs.writeFileSync(summaryFile, summaryContent, "utf-8");
-  savedFiles.push(summaryFile);
-
   console.log(`Saved ${savedFiles.length} CSV files to ${expDir}`);
   return savedFiles;
 }
@@ -107,15 +94,14 @@ function metricsToCSV(metrics: UpdateMetric[]): string {
   const headers = [
     "updateNumber",
     "operationType",
-    "groundTruthChanged",
     "gravelOutcome",
     "oldWatchQueryOutcome",
-    "gravelCorrect",
-    "oldWatchQueryCorrect",
-    "durationMs",
     "gravelLatencyMs",
     "oldWatchQueryLatencyMs",
     "naiveLatencyMs",
+    "gravelDbReads",
+    "oldWatchQueryDbReads",
+    "naiveDbReads",
   ];
 
   const rows: string[] = [headers.join(",")];
@@ -125,15 +111,14 @@ function metricsToCSV(metrics: UpdateMetric[]): string {
       [
         m.updateNumber,
         m.operationType,
-        m.groundTruthChanged,
         m.gravelOutcome,
         m.oldWatchQueryOutcome,
-        m.gravelCorrect,
-        m.oldWatchQueryCorrect,
-        m.durationMs,
         m.gravelLatencyMs,
         m.oldWatchQueryLatencyMs,
         m.naiveLatencyMs,
+        m.gravelDbReads,
+        m.oldWatchQueryDbReads,
+        m.naiveDbReads,
       ].join(","),
     );
   }

@@ -219,6 +219,9 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
+		// Decrement the query count for the inital query
+		dbService.Connection.DecrementQueryCount()
+
 		// check if the watchquery already exists with the hash. Different clients can have the same watchquery.
 		// we need to ensure that all unique clients in the
 		dbService.WatchQueriesMutex.RLock()
@@ -416,9 +419,6 @@ func (gravel *GravelServer) StartListening() {
 
 		// Get the count and reset it; subtract 1 for the initial query
 		count := dbService.Connection.GetAndResetQueryCount()
-		if count > 0 {
-			count--
-		}
 
 		response := fmt.Sprintf(`{"count":%d}`, count)
 		m.Respond([]byte(response))

@@ -44,15 +44,14 @@ export interface ExperimentConfig {
 export interface UpdateMetric {
   updateNumber: number;
   operationType: string;
-  groundTruthChanged: boolean;
   gravelOutcome: "TP" | "TN" | "FP" | "FN";
   oldWatchQueryOutcome: "TP" | "TN" | "FP" | "FN";
-  gravelCorrect: boolean;
-  oldWatchQueryCorrect: boolean;
-  durationMs: number;
   gravelLatencyMs: number;
   oldWatchQueryLatencyMs: number;
   naiveLatencyMs: number;
+  gravelDbReads: number;
+  oldWatchQueryDbReads: number;
+  naiveDbReads: number;
   gravelUpdateBytes: number;
   oldWatchQueryUpdateBytes: number;
   groundTruthBytes: number;
@@ -213,15 +212,14 @@ function writeQueryResultsToCSV(
     "repetition",
     "update_number",
     "operation_type",
-    "ground_truth_changed",
     "gravel_outcome",
     "old_watchquery_outcome",
-    "gravel_correct",
-    "old_watchquery_correct",
-    "duration_ms",
     "gravel_latency_ms",
     "old_watchquery_latency_ms",
     "naive_latency_ms",
+    "gravel_db_reads",
+    "old_watchquery_db_reads",
+    "naive_db_reads",
     "gravel_update_bytes",
     "old_watchquery_update_bytes",
     "ground_truth_bytes",
@@ -236,15 +234,14 @@ function writeQueryResultsToCSV(
         rep.repetitionNumber,
         metric.updateNumber,
         metric.operationType,
-        metric.groundTruthChanged ? 1 : 0,
         metric.gravelOutcome,
         metric.oldWatchQueryOutcome,
-        metric.gravelCorrect ? 1 : 0,
-        metric.oldWatchQueryCorrect ? 1 : 0,
-        metric.durationMs,
         metric.gravelLatencyMs,
         metric.oldWatchQueryLatencyMs,
         metric.naiveLatencyMs,
+        metric.gravelDbReads,
+        metric.oldWatchQueryDbReads,
+        metric.naiveDbReads,
         metric.gravelUpdateBytes,
         metric.oldWatchQueryUpdateBytes,
         metric.groundTruthBytes,
@@ -254,61 +251,6 @@ function writeQueryResultsToCSV(
   }
 
   fs.writeFileSync(filename, rows.join("\n"), "utf-8");
-
-  // Write summary CSV with averaged total bytes per repetition
-  const summaryFilename = path.join(outputDir, `${sanitizedName}_summary.csv`);
-  const summaryHeader = [
-    "repetition",
-    "gravel_total_bytes",
-    "old_watchquery_total_bytes",
-    "ground_truth_total_bytes",
-    "gravel_db_queries",
-    "old_watchquery_db_queries",
-  ].join(",");
-
-  const summaryRows: string[] = [summaryHeader];
-  let avgGravelTotal = 0,
-    avgOldTotal = 0,
-    avgGroundTruth = 0,
-    avgGravelDbQueries = 0,
-    avgOldDbQueries = 0;
-
-  for (const rep of repetitions) {
-    const gravelTotal = rep.gravelInitialBytes + rep.gravelTotalUpdateBytes;
-    const oldTotal =
-      rep.oldWatchQueryInitialBytes + rep.oldWatchQueryTotalUpdateBytes;
-
-    avgGravelTotal += gravelTotal;
-    avgOldTotal += oldTotal;
-    avgGroundTruth += rep.groundTruthTotalBytes;
-    avgGravelDbQueries += rep.gravelDbQueries;
-    avgOldDbQueries += rep.oldWatchQueryDbQueries;
-
-    const summaryRow = [
-      rep.repetitionNumber,
-      gravelTotal,
-      oldTotal,
-      rep.groundTruthTotalBytes,
-      rep.gravelDbQueries,
-      rep.oldWatchQueryDbQueries,
-    ].join(",");
-    summaryRows.push(summaryRow);
-  }
-
-  // Add average row
-  const count = repetitions.length;
-  const avgRow = [
-    "avg",
-    (avgGravelTotal / count).toFixed(2),
-    (avgOldTotal / count).toFixed(2),
-    (avgGroundTruth / count).toFixed(2),
-    (avgGravelDbQueries / count).toFixed(2),
-    (avgOldDbQueries / count).toFixed(2),
-  ].join(",");
-  summaryRows.push(avgRow);
-
-  fs.writeFileSync(summaryFilename, summaryRows.join("\n"), "utf-8");
-  console.log(`  Summary CSV saved: ${summaryFilename}`);
   console.log(`  CSV saved: ${filename}`);
 }
 
@@ -636,7 +578,6 @@ async function runRepetition(
 
     watchers.resetUpdateFlags();
 
-    const updateStartTime = Date.now();
     const totalUsers = await collection.countDocuments({});
     const updateIssuedTime = Date.now();
     const shouldTargetSingleIdUpdate =
@@ -663,6 +604,11 @@ async function runRepetition(
     const writeDurationMs = Date.now() - updateIssuedTime;
 
     await watchers.waitForUpdates(4000);
+
+    const gravelDbReads = await watchers.getGravelDbQueryCount();
+
+    const oldWatchQueryDbReads = getAndResetDbQueryCount();
+    const naiveDbReads = 1;
 
     const groundTruthStartTime = Date.now();
     const groundTruth = await watchers.getGroundTruth(
@@ -705,9 +651,6 @@ async function runRepetition(
 
     const updateEndTime = Date.now();
 
-    const groundTruthChanged =
-      JSON.stringify(gravelStateBefore) !== JSON.stringify(groundTruth);
-
     // Latency: total time from before write to watcher response, minus the write duration
     // This isolates change stream propagation + processing time
     const gravelLatencyMs = watchers.gravelState.lastUpdateTimestamp
@@ -731,16 +674,14 @@ async function runRepetition(
     const metric: UpdateMetric = {
       updateNumber: i + 1,
       operationType,
-      groundTruthChanged,
       gravelOutcome,
       oldWatchQueryOutcome,
-      gravelCorrect: gravelOutcome === "TP" || gravelOutcome === "TN",
-      oldWatchQueryCorrect:
-        oldWatchQueryOutcome === "TP" || oldWatchQueryOutcome === "TN",
-      durationMs: updateEndTime - updateStartTime,
       gravelLatencyMs,
       oldWatchQueryLatencyMs,
       naiveLatencyMs,
+      gravelDbReads,
+      oldWatchQueryDbReads,
+      naiveDbReads,
       gravelUpdateBytes: watchers.gravelState.lastUpdateBytes,
       oldWatchQueryUpdateBytes: watchers.oldWatchQueryState.lastUpdateBytes,
       groundTruthBytes,
@@ -785,9 +726,11 @@ async function runRepetition(
     }
   }
 
-  // Fetch DB query counts before stopping watchers
-  const gravelDbQueries = await watchers.getGravelDbQueryCount();
-  const oldWatchQueryDbQueries = getAndResetDbQueryCount();
+  const gravelDbQueries = metrics.reduce((sum, m) => sum + m.gravelDbReads, 0);
+  const oldWatchQueryDbQueries = metrics.reduce(
+    (sum, m) => sum + m.oldWatchQueryDbReads,
+    0,
+  );
 
   await watchers.stopWatching();
 
