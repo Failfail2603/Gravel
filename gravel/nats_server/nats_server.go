@@ -85,3 +85,7 @@ func (natsInterface *NatsConnection) SubscribeTo(subject string, callback nats.M
 func (natsInterface *NatsConnection) Publish(subject string, data string) {
 	natsInterface.natsConn.Publish(subject, []byte(data))
 }
+
+func (natsInterface *NatsConnection) Request(subject string, data []byte, timeout time.Duration) (*nats.Msg, error) {
+	return natsInterface.natsConn.Request(subject, data, timeout)
+}

@@ -4,15 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"gravel/db"
+	"gravel/env"
 	"gravel/json_patch"
 	"gravel/nats_server"
 	"gravel/relevant_changes"
 	"gravel/types"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
 )
+
+var clientKeepAliveInterval = time.Duration(env.GetEnvIntOrDefault("CLIENT_KEEPALIVE_INTERVAL_SECONDS", 30)) * time.Second
+
+var staleClientTimeout = time.Duration(env.GetEnvIntOrDefault("CLIENT_STALE_TIMEOUT_SECONDS", 60)) * time.Second
 
 type WatchQueryRequest struct {
 	Database   string `json:"database"`
@@ -27,7 +33,10 @@ type GravelServer struct {
 	 * If a client connects to gravel and requests a database connection and there is currently no database open,
 	 * gravel will create a new database service for that client.
 	 */
-	dbServices map[string]*db.DBService
+	dbServices               map[string]*db.DBService
+	dbServicesMutex          sync.RWMutex
+	clientLastKeepAlive      map[string]time.Time
+	clientLastKeepAliveMutex sync.RWMutex
 }
 
 // detectAndResetClusterTimeBatch checks if a new ClusterTime batch has started
@@ -75,12 +84,68 @@ func trackWindowShifts(watchQuery *db.WatchQuery, patches []json_patch.JSONPatch
 
 func generateGravelServer(natsConnection *nats_server.NatsConnection) *GravelServer {
 	return &GravelServer{
-		natsConnection: natsConnection,
-		dbServices:     make(map[string]*db.DBService),
+		natsConnection:      natsConnection,
+		dbServices:          make(map[string]*db.DBService),
+		clientLastKeepAlive: make(map[string]time.Time),
 	}
 }
 
-func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQueryRequest) (*types.WatchQueryResponse, []types.Document, error) {
+func (gravel *GravelServer) removeClient(clientID string) {
+	gravel.dbServicesMutex.Lock()
+	dbService := gravel.dbServices[clientID]
+	if dbService == nil {
+		gravel.dbServicesMutex.Unlock()
+		return
+	}
+	delete(gravel.dbServices, clientID)
+	gravel.dbServicesMutex.Unlock()
+
+	gravel.clientLastKeepAliveMutex.Lock()
+	delete(gravel.clientLastKeepAlive, clientID)
+	gravel.clientLastKeepAliveMutex.Unlock()
+
+	dbService.WatchQueriesMutex.Lock()
+	for hash, watchQuery := range dbService.WatchQueries {
+		watchQuery.Mutex.Lock()
+		watchQuery.Stopped = true
+		watchQuery.Mutex.Unlock()
+		watchQuery.StopDrainer()
+		delete(dbService.WatchQueries, hash)
+	}
+	dbService.WatchQueriesMutex.Unlock()
+
+	dbService.Connection.StopChangeStream()
+	if err := dbService.Connection.Disconnect(); err != nil {
+		log.Printf("Failed to disconnect DB service for stale client %s: %v", clientID, err)
+	}
+
+	log.Printf("Removed stale client %s and cleaned up its watchqueries", clientID)
+}
+
+func (gravel *GravelServer) startClientKeepAliveLoop() {
+	ticker := time.NewTicker(clientKeepAliveInterval)
+	go func() {
+		for range ticker.C {
+			now := time.Now()
+
+			gravel.clientLastKeepAliveMutex.RLock()
+			staleClientIDs := make([]string, 0)
+			for clientID, lastKeepAlive := range gravel.clientLastKeepAlive {
+				if now.Sub(lastKeepAlive) > staleClientTimeout {
+					staleClientIDs = append(staleClientIDs, clientID)
+				}
+			}
+			gravel.clientLastKeepAliveMutex.RUnlock()
+
+			for _, clientID := range staleClientIDs {
+				log.Printf("Client %s expired after %s without a keepalive", clientID, staleClientTimeout)
+				gravel.removeClient(clientID)
+			}
+		}
+	}()
+}
+
+func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQueryRequest, publishChannel string) (*types.WatchQueryResponse, []types.Document, error) {
 	// Execute the query using the dbService
 	results := dbService.Connection.Query(req.CollectionName, req.Query, req.Options)
 
@@ -112,14 +177,14 @@ func (gravel *GravelServer) runQuery(dbService *db.DBService, req types.WatchQue
 		return nil, nil, err
 	}
 
-	// Publish the results to the initial data channel
-	channelName := "gravel.mongo.initial." + req.ClientID
-	gravel.natsConnection.Publish(channelName, string(responseJSON))
+	// Publish the results to the specified channel
+	gravel.natsConnection.Publish(publishChannel, string(responseJSON))
 
 	return &response, results, nil
 }
 
 func (gravel *GravelServer) StartListening() {
+	gravel.startClientKeepAliveLoop()
 
 	gravel.natsConnection.SubscribeTo("gravel.connect", func(m *nats.Msg) {
 		log.Println("Received gravel.connect request")
@@ -141,7 +206,10 @@ func (gravel *GravelServer) StartListening() {
 
 		// check if a connection to the requested database already exists
 		// if not create a new connection
-		if _, exists := gravel.dbServices[req.ClientID]; !exists {
+		gravel.dbServicesMutex.RLock()
+		_, exists := gravel.dbServices[req.ClientID]
+		gravel.dbServicesMutex.RUnlock()
+		if !exists {
 
 			service, err := db.StartDBConnection(req)
 
@@ -157,13 +225,52 @@ func (gravel *GravelServer) StartListening() {
 				m.Respond(responseData)
 				return
 			}
+			gravel.dbServicesMutex.Lock()
 			gravel.dbServices[req.ClientID] = service
+			gravel.dbServicesMutex.Unlock()
+
+			gravel.clientLastKeepAliveMutex.Lock()
+			gravel.clientLastKeepAlive[req.ClientID] = time.Now()
+			gravel.clientLastKeepAliveMutex.Unlock()
 		}
 
 		// Send success response
 		response := types.DatabaseConnectResponse{
 			Status:   "connected",
 			Database: req.MongoURL,
+		}
+		responseData, _ := json.Marshal(response)
+		m.Respond(responseData)
+	})
+
+	gravel.natsConnection.SubscribeTo("gravel.keepalive", func(m *nats.Msg) {
+		var req types.KeepAliveRequest
+		if err := json.Unmarshal(m.Data, &req); err != nil {
+			m.Respond([]byte(`{"status":"error"}`))
+			return
+		}
+
+		gravel.dbServicesMutex.RLock()
+		_, exists := gravel.dbServices[req.ClientID]
+		gravel.dbServicesMutex.RUnlock()
+		if !exists {
+			log.Printf("Received client keepalive for unknown/stale client %s", req.ClientID)
+			response := types.KeepAliveResponse{
+				Status: "stale",
+			}
+			responseData, _ := json.Marshal(response)
+			m.Respond(responseData)
+			return
+		}
+
+		gravel.clientLastKeepAliveMutex.Lock()
+		gravel.clientLastKeepAlive[req.ClientID] = time.Now()
+		gravel.clientLastKeepAliveMutex.Unlock()
+
+		log.Printf("Received client keepalive from %s", req.ClientID)
+
+		response := types.KeepAliveResponse{
+			Status: "ok",
 		}
 		responseData, _ := json.Marshal(response)
 		m.Respond(responseData)
@@ -189,7 +296,9 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
+		gravel.dbServicesMutex.RLock()
 		var dbService *db.DBService = gravel.dbServices[req.ClientID]
+		gravel.dbServicesMutex.RUnlock()
 
 		if dbService == nil {
 			response := types.DebugMessage{
@@ -205,8 +314,10 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
-		// run the initial query which directly pipes to the client
-		queryResult, documents, err := gravel.runQuery(dbService, req)
+		publishChannel := "gravel.mongo.initial." + req.ClientID
+
+		// Execute initial query
+		queryResult, documents, err := gravel.runQuery(dbService, req, publishChannel)
 		if err != nil {
 			response := types.DebugMessage{
 				ClientID: req.ClientID,
@@ -228,7 +339,8 @@ func (gravel *GravelServer) StartListening() {
 		watchQuery := dbService.WatchQueries[req.Hash]
 		dbService.WatchQueriesMutex.RUnlock()
 
-		// if yes we just count up the connections count. We do not need to do anything else as gravel already sends updates down the channel
+		// server-side pooling: if the hash already exists, another client is already watching this query.
+		// increment the connection count so multiple clients share the same watchquery.
 		if watchQuery != nil {
 			dbService.WatchQueriesMutex.Lock()
 			watchQuery.NumberOfConnections++
@@ -239,9 +351,6 @@ func (gravel *GravelServer) StartListening() {
 				Status:   "success",
 			}
 			responseData, _ := json.Marshal(response)
-			if response.Error != "" {
-				log.Println(response.Error)
-			}
 			m.Respond(responseData)
 			return
 		}
@@ -360,25 +469,17 @@ func (gravel *GravelServer) StartListening() {
 				log.Println("Calculated Update took ", end.Sub(start).String())
 				log.Println("")
 
-				// send the update to the client
-				var updateResponse types.WatchQueryResponse
-				if len(patches) == 0 {
-					// Send noop message to indicate that the update was processed but resulted in no changes
-					updateResponse = types.WatchQueryResponse{
-						QueryHash: req.Hash,
-						Type:      "noop",
-						Result:    "[]",
-					}
-				} else {
-					updateResponse = types.WatchQueryResponse{
+				if len(patches) > 0 {
+					// send the update to the client
+					updateResponse := types.WatchQueryResponse{
 						QueryHash: req.Hash,
 						Type:      "patch",
 						Result:    json_patch.PatchArrayToString(patches),
 					}
-				}
 
-				responseData, _ := json.Marshal(updateResponse)
-				gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(responseData))
+					responseData, _ := json.Marshal(updateResponse)
+					gravel.natsConnection.Publish("gravel.mongo.watchquery."+req.ClientID, string(responseData))
+				}
 
 				// Unlock after processing is complete
 				newWatchQuery.Mutex.Unlock()
@@ -411,7 +512,9 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
+		gravel.dbServicesMutex.RLock()
 		dbService := gravel.dbServices[req.ClientID]
+		gravel.dbServicesMutex.RUnlock()
 		if dbService == nil {
 			m.Respond([]byte(`{"count":0}`))
 			return
@@ -475,9 +578,8 @@ func (gravel *GravelServer) StartListening() {
 		dbService.WatchQueriesMutex.Lock()
 		watchQuery.NumberOfConnections--
 
-		// if the connection count is 0 we pull the watchqeuery from the map
+		// only fully stop the watchquery when no more clients are using it
 		if watchQuery.NumberOfConnections == 0 {
-			// Lock the watchquery to signal graceful shutdown
 			watchQuery.Mutex.Lock()
 			watchQuery.Stopped = true
 			watchQuery.Mutex.Unlock()

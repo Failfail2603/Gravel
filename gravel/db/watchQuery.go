@@ -18,8 +18,8 @@ type WatchQuery struct {
 	Query      string
 	Options    string
 
-	// we dedube watchqueries by hash, so we need to count the number of connections to the same watchquery
-	// the multiplexing to the different queries observables will be handled by the client
+	// server-side deduplication: multiple clients connecting to the same database share watchqueries.
+	// this counter tracks how many client connections are using this watchquery for pooling.
 	NumberOfConnections int
 
 	// these are some analytical fields which get computed at the register of the watchquery.

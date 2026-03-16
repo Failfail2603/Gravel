@@ -1,11 +1,12 @@
 import { connect, type Msg, type NatsConnection, type NatsError } from "nats";
-import { type GravelClient } from "./db/gravelClient.js";
+import { type GravelClient } from "./db/GravelClient.js";
 import {
   generateMongoProvider,
   type GravelMongoClient,
   type GravelMongoOptions,
 } from "./db/GravelMongoClient.js";
-import { GravelChannels } from "./gravelChannels.js";
+export { watchQueryToObservable } from "./db/watchQueryObservable.js";
+export type { WatchQueryResult } from "./db/watchQueryObservable.js";
 
 export enum GravelDBs {
   MongoDB = "mongodb",
@@ -58,25 +59,21 @@ export interface Gravel {
  */
 async function connectToGravel(
   connectionOptions: GravelConnectionOptions,
+  timeoutMs?: number,
 ): Promise<NatsConnection> {
-  const timeout = connectionOptions.timeoutMs ?? 10000;
-  const host = connectionOptions.gravelHost ?? "localhost";
+  const timeout = timeoutMs ?? connectionOptions.timeoutMs ?? 10000;
+  const host = connectionOptions.gravelHost ?? "127.0.0.1";
   const port = connectionOptions.gravelPort ?? 4222;
+  const serverUrls = connectionOptions.gravelHost
+    ? [`nats://${host}:${port}`]
+    : [`nats://127.0.0.1:${port}`, `nats://localhost:${port}`];
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(
-        new Error(
-          `Gravel connection timed out after ${timeout}ms. Make sure you Gravel is running and you are using the correct connection string.`,
-        ),
-      );
-    }, timeout);
+  const natsConnection = await connect({
+    servers: serverUrls,
+    timeout,
+    waitOnFirstConnect: false,
+    maxReconnectAttempts: 0,
   });
-
-  const natsConnection = await Promise.race([
-    connect({ servers: [`${host}:${port}`] }),
-    timeoutPromise,
-  ]);
 
   return natsConnection;
 }
@@ -86,9 +83,11 @@ export async function intializeGravel(
 ): Promise<Gravel> {
   const connectionOptions = gravelOptions?.connection ?? {};
 
-  const natsConnection = await connectToGravel(connectionOptions);
-
   const databaseClients: Map<string, GravelClient> = new Map();
+
+  const createNatsConnection = async (
+    timeoutMs?: number,
+  ): Promise<NatsConnection> => connectToGravel(connectionOptions, timeoutMs);
 
   const gravelInstance: Gravel = {
     getDatabaseClient: <T extends GravelDBs>(
@@ -113,7 +112,7 @@ export async function intializeGravel(
         switch (options.db) {
           case GravelDBs.MongoDB:
             existingClient = (await generateMongoProvider(
-              natsConnection,
+              createNatsConnection,
               options as GravelMongoOptions,
             )) as DatabaseClientMap[T];
             break;
@@ -131,11 +130,6 @@ export async function intializeGravel(
         // if the developer specifies a debug callback we subscribe to the debug channel and forward the messages to the callback
         if (gravelOptions?.debugChannelCallback) {
           existingClient.debugCallback = gravelOptions?.debugChannelCallback;
-
-          const debugSubscription = natsConnection.subscribe(
-            GravelChannels.GravelDebug + "." + existingClient.clientID,
-          );
-          debugSubscription.callback = gravelOptions?.debugChannelCallback;
         }
 
         databaseClients.set(existingClient.dbProviderID, existingClient);
@@ -144,13 +138,13 @@ export async function intializeGravel(
       });
     },
     close: async (): Promise<void> => {
-      // Clear all database clients
+      for (const client of databaseClients.values()) {
+        await client.close();
+      }
+
       databaseClients.clear();
 
-      // Drain and close the NATS connection
-      await natsConnection.drain();
-
-      console.log("NATS connection closed");
+      console.log("Gravel client connections closed");
     },
   };
 

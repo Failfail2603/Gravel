@@ -68,6 +68,16 @@ type WatchQueryRequest struct {
 	Options        string `json:"options"`
 }
 
+// KeepAliveRequest represents a keepalive ping from a client
+type KeepAliveRequest struct {
+	ClientID string `json:"clientID"`
+}
+
+// KeepAliveResponse represents the server's response to a keepalive ping
+type KeepAliveResponse struct {
+	Status string `json:"status"`
+}
+
 // WatchQueryStopRequest represents a request to stop watching a query
 type WatchQueryStopRequest struct {
 	ClientID string `json:"clientID"`
