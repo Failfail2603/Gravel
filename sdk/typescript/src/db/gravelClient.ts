@@ -2,6 +2,15 @@ import type { Msg, NatsConnection, NatsError } from "nats";
 import { Subject } from "rxjs";
 import { v4 as uuidv4 } from "uuid";
 import { GravelChannels } from "../gravelChannels.js";
+import {
+  buildKeepAliveRequest,
+  isServerStaleKeepAliveResponse,
+  KEEPALIVE_CHECK_INTERVAL_MS,
+  KEEPALIVE_MAX_FAILURES,
+  KEEPALIVE_REQUEST_TIMEOUT_MS,
+  STALE_RECONNECT_TIMEOUT_MS,
+  type GravelKeepAliveResponse,
+} from "./gravelKeepalive.js";
 
 // #region Public interface
 
@@ -40,14 +49,6 @@ export interface GravelWatchQueryStopRequest {
   hash: string;
 }
 
-export interface GravelKeepAliveRequest {
-  clientID: string;
-}
-
-export interface GravelKeepAliveResponse {
-  status: string;
-}
-
 export interface GravelSubscription<
   T extends Record<string, any> = Record<string, any>,
 > {
@@ -57,15 +58,6 @@ export interface GravelSubscription<
   changes: Subject<unknown>;
   stop: () => Promise<void>;
 }
-
-// #endregion
-
-// #region Keepalive constants
-
-const KEEPALIVE_CHECK_INTERVAL_MS = 1000 * 20;
-const KEEPALIVE_REQUEST_TIMEOUT_MS = 3000;
-const KEEPALIVE_MAX_FAILURES = 3;
-const STALE_RECONNECT_TIMEOUT_MS = 5000;
 
 // #endregion
 
@@ -213,32 +205,6 @@ export async function createGravelClient(
     natsConnection: NatsConnection,
     sessionClientID: string,
   ) {
-    natsConnection.subscribe(
-      `${GravelChannels.ClientKeepAlive}.${sessionClientID}`,
-      {
-        callback(err, msg) {
-          if (currentClientID !== sessionClientID) {
-            return;
-          }
-
-          if (err) {
-            console.error("[Gravel] Client keepalive subscription error:", err);
-            return;
-          }
-
-          console.log(
-            "[Gravel] Received server keepalive probe for client",
-            sessionClientID,
-          );
-          msg.respond(
-            JSON.stringify({
-              clientID: sessionClientID,
-            } satisfies GravelKeepAliveRequest),
-          );
-        },
-      },
-    );
-
     natsConnection.subscribe(`${channelPrefix}.watchquery.${sessionClientID}`, {
       callback(err, msg) {
         if (currentClientID !== sessionClientID) {
@@ -344,6 +310,7 @@ export async function createGravelClient(
     const connectRequest = {
       ...config.connectRequest,
       clientID: sessionClientID,
+      keepAliveIntervalMs: KEEPALIVE_CHECK_INTERVAL_MS,
     };
 
     await natsConnection.request(
@@ -457,9 +424,7 @@ export async function createGravelClient(
     console.log("[Gravel] Sending client keepalive for", currentClientID);
     const keepAliveResponseMessage = await currentConnection.request(
       "gravel.keepalive",
-      JSON.stringify({
-        clientID: currentClientID,
-      } satisfies GravelKeepAliveRequest),
+      JSON.stringify(buildKeepAliveRequest(currentClientID)),
       { timeout: KEEPALIVE_REQUEST_TIMEOUT_MS },
     );
 
@@ -491,7 +456,7 @@ export async function createGravelClient(
 
       const keepAliveResponse = await sendKeepAlive();
 
-      if (keepAliveResponse.status === "stale") {
+      if (isServerStaleKeepAliveResponse(keepAliveResponse)) {
         console.warn(
           `[Gravel] Gravel reported client ${currentClientID} as stale, rebuilding immediately`,
         );

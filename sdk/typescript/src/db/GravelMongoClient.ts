@@ -3,7 +3,6 @@ import type { NatsConnection } from "nats";
 import { Observable } from "rxjs/internal/Observable";
 import { GravelDBs } from "../gravel.js";
 import { createGravelClient, type GravelClient } from "./GravelClient.js";
-import { watchQueryToObservable } from "./watchQueryObservable.js";
 
 // #region Mongo search types
 
@@ -78,7 +77,7 @@ export interface GravelMongoClient extends GravelClient {
     options?: GravelMongoWatchQueryFindOptions,
   ): Promise<{
     initialQuery: { result: Array<T> };
-    changes: Observable<Array<T>>;
+    changes: Observable<unknown>;
     stop: () => Promise<void>;
   }>;
 }
@@ -177,7 +176,7 @@ function hashQuery(
 }
 
 export async function generateMongoProvider(
-  createNatsConnection: () => Promise<NatsConnection>,
+  createNatsConnection: (timeoutMs?: number) => Promise<NatsConnection>,
   options: GravelMongoOptions,
 ): Promise<GravelMongoClient> {
   const base = await createGravelClient({
@@ -221,7 +220,7 @@ export async function generateMongoProvider(
       options?: GravelMongoWatchQueryFindOptions,
     ): Promise<{
       initialQuery: { result: Array<T> };
-      changes: Observable<Array<T>>;
+      changes: Observable<unknown>;
       stop: () => Promise<void>;
     }> {
       const queryHash = hashQuery(collectionName, query, options);
@@ -242,7 +241,7 @@ export async function generateMongoProvider(
 
       return {
         initialQuery: watchQuery.initialQuery,
-        changes: watchQueryToObservable(Promise.resolve(watchQuery)),
+        changes: watchQuery.changes,
         stop: watchQuery.stop,
       };
     },

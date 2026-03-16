@@ -1,4 +1,3 @@
-import { ObjectId } from "mongodb";
 import {
   GravelDBs,
   intializeGravel,
@@ -17,9 +16,18 @@ async function startStuff() {
   });
 
   const yeet = watchQueryToObservable(
-    mongo.watchQuery("users", {
-      _id: new ObjectId("699c746df9356c077cf4ecaf"),
-    }),
+    mongo.watchQuery(
+      "users",
+      {
+        email: "Selmer_Bode-Gerlach@hotmail.com",
+      },
+      {
+        projection: {
+          _id: 1,
+          email: 1,
+        },
+      },
+    ),
   );
 
   yeet.subscribe((d) => console.log(JSON.stringify(d, null, 2)));

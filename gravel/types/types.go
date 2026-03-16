@@ -46,9 +46,10 @@ type DBChangeStreamEvent struct {
 
 // DatabaseConnectRequest represents a request to connect to a database
 type DatabaseConnectRequest struct {
-	DBType   string `json:"dbType"`
-	MongoURL string `json:"mongoUrl"`
-	ClientID string `json:"clientID"`
+	DBType              string `json:"dbType"`
+	MongoURL            string `json:"mongoUrl"`
+	ClientID            string `json:"clientID"`
+	KeepAliveIntervalMs int    `json:"keepAliveIntervalMs"`
 }
 
 // DatabaseConnectResponse represents a response from a database connection attempt
@@ -70,7 +71,8 @@ type WatchQueryRequest struct {
 
 // KeepAliveRequest represents a keepalive ping from a client
 type KeepAliveRequest struct {
-	ClientID string `json:"clientID"`
+	ClientID            string `json:"clientID"`
+	KeepAliveIntervalMs int    `json:"keepAliveIntervalMs"`
 }
 
 // KeepAliveResponse represents the server's response to a keepalive ping

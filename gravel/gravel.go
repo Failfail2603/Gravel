@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"gravel/db"
-	"gravel/env"
 	"gravel/json_patch"
+	"gravel/keepalive"
 	"gravel/nats_server"
 	"gravel/relevant_changes"
 	"gravel/types"
@@ -15,10 +15,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 )
-
-var clientKeepAliveInterval = time.Duration(env.GetEnvIntOrDefault("CLIENT_KEEPALIVE_INTERVAL_SECONDS", 30)) * time.Second
-
-var staleClientTimeout = time.Duration(env.GetEnvIntOrDefault("CLIENT_STALE_TIMEOUT_SECONDS", 60)) * time.Second
 
 type WatchQueryRequest struct {
 	Database   string `json:"database"`
@@ -33,10 +29,9 @@ type GravelServer struct {
 	 * If a client connects to gravel and requests a database connection and there is currently no database open,
 	 * gravel will create a new database service for that client.
 	 */
-	dbServices               map[string]*db.DBService
-	dbServicesMutex          sync.RWMutex
-	clientLastKeepAlive      map[string]time.Time
-	clientLastKeepAliveMutex sync.RWMutex
+	dbServices       map[string]*db.DBService
+	dbServicesMutex  sync.RWMutex
+	keepAliveTracker *keepalive.Tracker
 }
 
 // detectAndResetClusterTimeBatch checks if a new ClusterTime batch has started
@@ -84,9 +79,9 @@ func trackWindowShifts(watchQuery *db.WatchQuery, patches []json_patch.JSONPatch
 
 func generateGravelServer(natsConnection *nats_server.NatsConnection) *GravelServer {
 	return &GravelServer{
-		natsConnection:      natsConnection,
-		dbServices:          make(map[string]*db.DBService),
-		clientLastKeepAlive: make(map[string]time.Time),
+		natsConnection:   natsConnection,
+		dbServices:       make(map[string]*db.DBService),
+		keepAliveTracker: keepalive.NewTracker(keepalive.DefaultInterval),
 	}
 }
 
@@ -100,9 +95,7 @@ func (gravel *GravelServer) removeClient(clientID string) {
 	delete(gravel.dbServices, clientID)
 	gravel.dbServicesMutex.Unlock()
 
-	gravel.clientLastKeepAliveMutex.Lock()
-	delete(gravel.clientLastKeepAlive, clientID)
-	gravel.clientLastKeepAliveMutex.Unlock()
+	gravel.keepAliveTracker.Remove(clientID)
 
 	dbService.WatchQueriesMutex.Lock()
 	for hash, watchQuery := range dbService.WatchQueries {
@@ -123,22 +116,14 @@ func (gravel *GravelServer) removeClient(clientID string) {
 }
 
 func (gravel *GravelServer) startClientKeepAliveLoop() {
-	ticker := time.NewTicker(clientKeepAliveInterval)
+	ticker := time.NewTicker(keepalive.DefaultInterval)
 	go func() {
 		for range ticker.C {
-			now := time.Now()
-
-			gravel.clientLastKeepAliveMutex.RLock()
-			staleClientIDs := make([]string, 0)
-			for clientID, lastKeepAlive := range gravel.clientLastKeepAlive {
-				if now.Sub(lastKeepAlive) > staleClientTimeout {
-					staleClientIDs = append(staleClientIDs, clientID)
-				}
-			}
-			gravel.clientLastKeepAliveMutex.RUnlock()
+			staleClientIDs := gravel.keepAliveTracker.ExpiredClients(time.Now())
 
 			for _, clientID := range staleClientIDs {
-				log.Printf("Client %s expired after %s without a keepalive", clientID, staleClientTimeout)
+				keepAliveInterval := gravel.keepAliveTracker.IntervalFor(clientID)
+				log.Printf("Client %s expired after missing %d keepalives (%s each)", clientID, keepalive.MissedKeepAliveThreshold, keepAliveInterval)
 				gravel.removeClient(clientID)
 			}
 		}
@@ -228,11 +213,9 @@ func (gravel *GravelServer) StartListening() {
 			gravel.dbServicesMutex.Lock()
 			gravel.dbServices[req.ClientID] = service
 			gravel.dbServicesMutex.Unlock()
-
-			gravel.clientLastKeepAliveMutex.Lock()
-			gravel.clientLastKeepAlive[req.ClientID] = time.Now()
-			gravel.clientLastKeepAliveMutex.Unlock()
 		}
+
+		gravel.keepAliveTracker.Update(req.ClientID, req.KeepAliveIntervalMs)
 
 		// Send success response
 		response := types.DatabaseConnectResponse{
@@ -263,9 +246,7 @@ func (gravel *GravelServer) StartListening() {
 			return
 		}
 
-		gravel.clientLastKeepAliveMutex.Lock()
-		gravel.clientLastKeepAlive[req.ClientID] = time.Now()
-		gravel.clientLastKeepAliveMutex.Unlock()
+		gravel.keepAliveTracker.Update(req.ClientID, req.KeepAliveIntervalMs)
 
 		log.Printf("Received client keepalive from %s", req.ClientID)
 
