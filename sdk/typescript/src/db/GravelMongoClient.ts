@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { GravelDBs } from "../gravel.js";
 import { GravelChannels } from "../gravelChannels.js";
 import type { GravelDatabaseConnectRequest } from "../natsMessages.js";
-import type { GravelClient } from "./gravelClient.js";
+import type { GravelClient } from "./GravelClient.js";
 
 // #region Mongo search types
 

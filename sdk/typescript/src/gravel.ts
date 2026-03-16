@@ -4,33 +4,31 @@ import {
   generateMongoProvider,
   type GravelMongoClient,
   type GravelMongoOptions,
-} from "./db/mongo.js";
-import {
-  generateRedisProvider,
-  type GravelRedisClient,
-  type GravelRedisOptions,
-} from "./db/redis.js";
+} from "./db/GravelMongoClient.js";
 import { GravelChannels } from "./gravelChannels.js";
 
 export enum GravelDBs {
   MongoDB = "mongodb",
-  Redis = "redis",
+}
+
+interface GravelConnectionOptions {
+  gravelHost?: string;
+  gravelPort?: number;
+  timeoutMs?: number; // Connection timeout in milliseconds (default: 10000)
 }
 
 export interface GravelConnectOptions {
   debugChannelCallback?: (err: NatsError | null, msg: Msg) => void;
-  timeoutMs?: number; // Connection timeout in milliseconds (default: 10000)
+  connection: GravelConnectionOptions;
 }
 
 // Conditional type mapping for database clients
 type DatabaseClientMap = {
   [GravelDBs.MongoDB]: GravelMongoClient;
-  [GravelDBs.Redis]: GravelRedisClient;
 };
 
 type DatabaseOptionsClientMap = {
   [GravelDBs.MongoDB]: GravelMongoOptions;
-  [GravelDBs.Redis]: GravelRedisOptions;
 };
 
 function getDBProviderID<T extends GravelDBs>(
@@ -38,10 +36,7 @@ function getDBProviderID<T extends GravelDBs>(
 ): string {
   switch (options.db) {
     case GravelDBs.MongoDB:
-      // @ts-expect-error we guarded the type via the function definitions and the switch
       return options.mongoUrl;
-    case GravelDBs.Redis:
-      return "redis";
   }
 }
 
@@ -55,14 +50,6 @@ export interface Gravel {
 }
 
 /**
- * Map of gravel connections
- * Each unique database will have a
- */
-let gravelInstance: Gravel | null = null;
-
-const databaseClients: Map<string, GravelClient> = new Map();
-
-/**
  * Connects to Gravel initially and returns a NatsConnection
  *
  * @param timeoutMs - Timeout in milliseconds (default: 10000)
@@ -70,29 +57,40 @@ const databaseClients: Map<string, GravelClient> = new Map();
  * @throws Error if connection times out
  */
 async function connectToGravel(
-  timeoutMs: number = 10000,
+  connectionOptions: GravelConnectionOptions,
 ): Promise<NatsConnection> {
+  const timeout = connectionOptions.timeoutMs ?? 10000;
+  const host = connectionOptions.gravelHost ?? "localhost";
+  const port = connectionOptions.gravelPort ?? 4222;
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
-      reject(new Error(`Gravel connection timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+      reject(
+        new Error(
+          `Gravel connection timed out after ${timeout}ms. Make sure you Gravel is running and you are using the correct connection string.`,
+        ),
+      );
+    }, timeout);
   });
 
-  const natsConnection = await Promise.race([connect(), timeoutPromise]);
+  const natsConnection = await Promise.race([
+    connect({ servers: [`${host}:${port}`] }),
+    timeoutPromise,
+  ]);
 
   return natsConnection;
 }
 
-export async function getGravelConnection(
+export async function intializeGravel(
   gravelOptions?: GravelConnectOptions,
 ): Promise<Gravel> {
-  if (gravelInstance) {
-    return gravelInstance;
-  }
+  const connectionOptions = gravelOptions?.connection ?? {};
 
-  const natsConnection = await connectToGravel(gravelOptions?.timeoutMs);
+  const natsConnection = await connectToGravel(connectionOptions);
 
-  gravelInstance = {
+  const databaseClients: Map<string, GravelClient> = new Map();
+
+  const gravelInstance: Gravel = {
     getDatabaseClient: <T extends GravelDBs>(
       options: {
         db: T;
@@ -117,13 +115,6 @@ export async function getGravelConnection(
             existingClient = (await generateMongoProvider(
               natsConnection,
               options as GravelMongoOptions,
-            )) as DatabaseClientMap[T];
-            break;
-          case GravelDBs.Redis:
-            existingClient = (await generateRedisProvider(
-              natsConnection,
-
-              options as GravelRedisOptions,
             )) as DatabaseClientMap[T];
             break;
           default:
@@ -158,9 +149,6 @@ export async function getGravelConnection(
 
       // Drain and close the NATS connection
       await natsConnection.drain();
-
-      // Clear the gravel instance
-      gravelInstance = null;
 
       console.log("NATS connection closed");
     },
