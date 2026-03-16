@@ -1,6 +1,6 @@
 import type { Msg, NatsConnection, NatsError } from "nats";
 import { Subject } from "rxjs";
-import { GravelChannels } from "../gravelChannels.js";
+import { GravelChannels } from "./GravelChannels.js";
 import {
   buildKeepAliveRequest,
   isServerStaleKeepAliveResponse,
@@ -10,7 +10,7 @@ import {
   STALE_RECONNECT_TIMEOUT_MS,
   type GravelKeepAliveResponse,
 } from "./gravelKeepalive.js";
-import { createQueryRegistry, type QueryRegistry } from "./queryRegistry.js";
+import { createQueryRegistry, type QueryRegistry } from "./QueryRegistry.js";
 import { createSession, type GravelNatsConfig } from "./session.js";
 
 // #region Public interface

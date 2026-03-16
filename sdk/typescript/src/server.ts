@@ -2,7 +2,7 @@ import {
   GravelDBs,
   initializeGravel,
   watchQueryToObservable,
-} from "./gravel.js";
+} from "./Gravel.js";
 
 async function startStuff() {
   console.log("Starting stuff...");
@@ -30,7 +30,7 @@ async function startStuff() {
     ),
   );
 
-  yeet.subscribe((d) => console.log(JSON.stringify(d, null, 2)));
+  yeet.subscribe((d: unknown) => console.log(JSON.stringify(d, null, 2)));
 }
 
 startStuff();

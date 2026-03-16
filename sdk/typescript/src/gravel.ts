@@ -1,13 +1,13 @@
 import { type Msg, type NatsError } from "nats";
-import { type GravelClient } from "./db/GravelClient.js";
+import { type GravelClient } from "./GravelClient.js";
 import {
   generateMongoProvider,
   type GravelMongoClient,
   type GravelMongoOptions,
 } from "./db/GravelMongoClient.js";
-import type { GravelNatsConfig } from "./db/session.js";
-export { watchQueryToObservable } from "./db/watchQueryObservable.js";
-export type { WatchQueryResult } from "./db/watchQueryObservable.js";
+import type { GravelNatsConfig } from "./session.js";
+export { watchQueryToObservable } from "./watchQueryObservable.js";
+export type { WatchQueryResult } from "./watchQueryObservable.js";
 
 export enum GravelDBs {
   MongoDB = "mongodb",

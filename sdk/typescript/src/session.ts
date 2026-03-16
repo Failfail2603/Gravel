@@ -1,12 +1,12 @@
 import { connect, type Msg, type NatsConnection, type NatsError } from "nats";
 import { v4 as uuidv4 } from "uuid";
-import { GravelChannels } from "../gravelChannels.js";
+import { GravelChannels } from "./GravelChannels.js";
 import type {
   GravelClientConfig,
   GravelWatchQueryResponse,
 } from "./GravelClient.js";
 import { KEEPALIVE_CHECK_INTERVAL_MS } from "./gravelKeepalive.js";
-import type { QueryRegistry } from "./queryRegistry.js";
+import type { QueryRegistry } from "./QueryRegistry.js";
 
 // #region NATS connection
 

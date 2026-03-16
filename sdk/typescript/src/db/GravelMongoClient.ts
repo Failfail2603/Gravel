@@ -1,8 +1,8 @@
 import { ObjectId } from "mongodb";
 import { Observable } from "rxjs/internal/Observable";
-import { GravelDBs } from "../gravel.js";
-import { createGravelClient, type GravelClient } from "./GravelClient.js";
-import type { GravelNatsConfig } from "./session.js";
+import { GravelDBs } from "../Gravel.js";
+import { createGravelClient, type GravelClient } from "../GravelClient.js";
+import type { GravelNatsConfig } from "../session.js";
 
 // #region Mongo search types
 
