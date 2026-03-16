@@ -16,23 +16,55 @@ export interface GravelNatsConfig {
   timeoutMs?: number;
 }
 
+function resolveNatsServerUrls(natsConfig: GravelNatsConfig): string[] {
+  const port = natsConfig.gravelPort ?? 4222;
+  const configuredHost = natsConfig.gravelHost?.trim();
+
+  if (!configuredHost) {
+    return [`nats://127.0.0.1:${port}`, `nats://localhost:${port}`];
+  }
+
+  if (
+    configuredHost === "0.0.0.0" ||
+    configuredHost === "::" ||
+    configuredHost === "[::]"
+  ) {
+    return [`nats://127.0.0.1:${port}`, `nats://localhost:${port}`];
+  }
+
+  return [`nats://${configuredHost}:${port}`];
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function connectToNats(
   natsConfig: GravelNatsConfig,
   timeoutMs?: number,
 ): Promise<NatsConnection> {
   const timeout = timeoutMs ?? natsConfig.timeoutMs ?? 10000;
-  const host = natsConfig.gravelHost ?? "127.0.0.1";
-  const port = natsConfig.gravelPort ?? 4222;
-  const serverUrls = natsConfig.gravelHost
-    ? [`nats://${host}:${port}`]
-    : [`nats://127.0.0.1:${port}`, `nats://localhost:${port}`];
+  const serverUrls = resolveNatsServerUrls(natsConfig);
 
-  return connect({
-    servers: serverUrls,
-    timeout,
-    waitOnFirstConnect: false,
-    maxReconnectAttempts: 0,
-  });
+  try {
+    return await connect({
+      servers: serverUrls,
+      timeout,
+      waitOnFirstConnect: false,
+      maxReconnectAttempts: 0,
+    });
+  } catch (error) {
+    await delay(500);
+
+    return connect({
+      servers: serverUrls,
+      timeout,
+      waitOnFirstConnect: false,
+      maxReconnectAttempts: 0,
+    });
+  }
 }
 
 // #endregion

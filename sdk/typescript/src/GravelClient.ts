@@ -243,7 +243,6 @@ async function recoverFromStaleConnection(
   } catch (error) {
     console.error(
       "[Gravel] Stale recovery failed, will retry on next keepalive interval:",
-      error,
     );
     state.isStale = true;
   } finally {
@@ -311,7 +310,6 @@ async function runKeepalivetick(
     state.keepaliveFailures += 1;
     console.warn(
       `[Gravel] Client keepalive failed for ${state.clientID} (${state.keepaliveFailures}/${KEEPALIVE_MAX_FAILURES})`,
-      error,
     );
 
     if (state.keepaliveFailures >= KEEPALIVE_MAX_FAILURES) {
@@ -361,10 +359,11 @@ export async function createGravelClient(
 
   await replaceSession(config, state, registry);
 
-  const keepaliveInterval = setInterval(
-    () => void runKeepalivetick(config, state, registry),
-    KEEPALIVE_CHECK_INTERVAL_MS,
-  );
+  const keepaliveInterval = setInterval(() => {
+    runKeepalivetick(config, state, registry).catch((error) => {
+      console.error("[Gravel] Unexpected error in keepalive tick:", error);
+    });
+  }, KEEPALIVE_CHECK_INTERVAL_MS);
 
   async function registerWatchQuery<T extends Record<string, any>>(
     hash: string,
