@@ -1,13 +1,13 @@
 import {
   GravelDBs,
-  intializeGravel,
+  initializeGravel,
   watchQueryToObservable,
 } from "./gravel.js";
 
 async function startStuff() {
   console.log("Starting stuff...");
 
-  const gravelClient = await intializeGravel();
+  const gravelClient = await initializeGravel();
   console.log("Gravel client initialized");
 
   const mongo = await gravelClient.getDatabaseClient({

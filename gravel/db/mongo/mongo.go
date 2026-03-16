@@ -263,8 +263,6 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 		return nil
 	}
 
-	log.Print("Executing query without snapshot read concern %v", filter)
-
 	// Regular query without snapshot read concern
 	cursor, err = coll.Find(ctx, filter, &findOptions)
 	if err != nil {
@@ -278,7 +276,6 @@ func (m *MongoProvider) QueryWithEvent(ctx context.Context, event *types.DBChang
 	docCount := 0
 	for cursor.Next(ctx) {
 		var doc bson.M
-		log.Print("Executing query without snapshot read concern %v", doc)
 		if err := cursor.Decode(&doc); err != nil {
 			log.Printf("Failed to decode document: %v", err)
 			continue

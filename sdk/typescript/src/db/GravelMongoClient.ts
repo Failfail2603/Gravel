@@ -1,8 +1,8 @@
 import { ObjectId } from "mongodb";
-import type { NatsConnection } from "nats";
 import { Observable } from "rxjs/internal/Observable";
 import { GravelDBs } from "../gravel.js";
 import { createGravelClient, type GravelClient } from "./GravelClient.js";
+import type { GravelNatsConfig } from "./session.js";
 
 // #region Mongo search types
 
@@ -176,11 +176,11 @@ function hashQuery(
 }
 
 export async function generateMongoProvider(
-  createNatsConnection: (timeoutMs?: number) => Promise<NatsConnection>,
+  natsConfig: GravelNatsConfig,
   options: GravelMongoOptions,
 ): Promise<GravelMongoClient> {
   const base = await createGravelClient({
-    createNatsConnection,
+    natsConfig,
     dbProviderID: options.mongoUrl,
     channelPrefix: "gravel.mongo",
     connectRequest: {
