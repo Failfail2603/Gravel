@@ -67,6 +67,7 @@ type WatchQueryRequest struct {
 	CollectionName string `json:"collectionName"`
 	Query          string `json:"query"`
 	Options        string `json:"options"`
+	ExplainGravel  bool   `json:"explainGravel,omitempty"`
 }
 
 // KeepAliveRequest represents a keepalive ping from a client

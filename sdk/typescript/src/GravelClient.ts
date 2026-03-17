@@ -261,8 +261,6 @@ async function sendKeepAlive(
     throw new Error("No active NATS connection available");
   }
 
-  console.log("[Gravel] Sending client keepalive for", state.clientID);
-
   const responseMessage = await state.connection.request(
     "gravel.keepalive",
     JSON.stringify(buildKeepAliveRequest(state.clientID)),
@@ -272,8 +270,6 @@ async function sendKeepAlive(
   const response = JSON.parse(
     responseMessage.data.toString(),
   ) as GravelKeepAliveResponse;
-
-  console.log("[Gravel] Client keepalive succeeded for", state.clientID);
 
   return response;
 }

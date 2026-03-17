@@ -27,13 +27,13 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	// 1. the document is in the window -> remove it and get a new one to fill
 	// the function itselfs checks if the window is exhausted or infinite and gets a new document accroding to that
 	if removedDocumentWasInWindow {
-		return removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex, change)
+		return explainPatches(watchQuery, removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex, change), "Delete removed a document that was currently inside the watched window, so Gravel updated the result set.")
 	}
 
 	// 2. the document is above the window -> shift window down
 	// we can first check if there can even be documents above the window
 	if watchQuery.QueryInformation.WindowStart == 0 {
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Delete was ignored because the watchquery has no skipped documents above the current window.")
 	}
 
 	// after we know that the document is not in the window and could be above we need to check if the delete doc would even match the query
@@ -45,7 +45,7 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 	// if the document did not match we can disregard it
 	if !matched {
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Delete was ignored because the removed document did not match the watchquery filter.")
 	}
 
 	// the document matched and was not in window so we check if it is really above the window
@@ -57,9 +57,9 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 	// if the document is not above the window we can disregard it
 	if beforePositionRelativeToFirst == -1 {
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Delete matched the filter but occurred below the watched window, so no patch was emitted.")
 	}
 
 	// if the document was above the window we need to shift down so we can fill the gap
-	return ShiftWindow(dbService, watchQuery, ShiftDown, change)
+	return explainPatches(watchQuery, ShiftWindow(dbService, watchQuery, ShiftDown, change), "Delete removed a matching document above the watched window, so Gravel shifted the window down.")
 }

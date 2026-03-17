@@ -15,6 +15,10 @@ interface WatchQueryChangeEnvelope {
   result: unknown;
 }
 
+type GravelPatchOperation = Operation & {
+  explanations?: string[];
+};
+
 function isJsonPatchArray(value: unknown): value is Operation[] {
   return (
     Array.isArray(value) &&
@@ -69,6 +73,26 @@ function normalizeGravelPatchOperations(patches: Operation[]): Operation[] {
   });
 }
 
+function logPatchExplanations(patches: GravelPatchOperation[]): void {
+  for (const patch of patches) {
+    if (!Array.isArray(patch.explanations) || patch.explanations.length === 0) {
+      continue;
+    }
+
+    for (const explanation of patch.explanations) {
+      console.log(`[Gravel explain] ${explanation}`);
+    }
+  }
+}
+
+function isNoopPatch(patch: Operation): boolean {
+  return (patch as { op?: string }).op === "noop";
+}
+
+function filterExecutablePatches(patches: Operation[]): Operation[] {
+  return patches.filter((patch) => !isNoopPatch(patch));
+}
+
 export function watchQueryToObservable<T extends Record<string, any>>(
   watchQueryPromise: Promise<WatchQueryResult<T>>,
 ): Observable<Array<T>> {
@@ -102,9 +126,18 @@ export function watchQueryToObservable<T extends Record<string, any>>(
                 }
 
                 if (isJsonPatchArray(change.result)) {
+                  logPatchExplanations(change.result as GravelPatchOperation[]);
+
+                  const executablePatches = filterExecutablePatches(
+                    change.result,
+                  );
+                  if (executablePatches.length === 0) {
+                    return;
+                  }
+
                   currentData = applyPatch(
                     structuredClone(currentData),
-                    normalizeGravelPatchOperations(change.result),
+                    normalizeGravelPatchOperations(executablePatches),
                     false,
                     false,
                   ).newDocument as Array<T>;
@@ -116,9 +149,16 @@ export function watchQueryToObservable<T extends Record<string, any>>(
               }
 
               if (isJsonPatchArray(change)) {
+                logPatchExplanations(change as GravelPatchOperation[]);
+
+                const executablePatches = filterExecutablePatches(change);
+                if (executablePatches.length === 0) {
+                  return;
+                }
+
                 currentData = applyPatch(
                   structuredClone(currentData),
-                  normalizeGravelPatchOperations(change),
+                  normalizeGravelPatchOperations(executablePatches),
                   false,
                   false,
                 ).newDocument as Array<T>;

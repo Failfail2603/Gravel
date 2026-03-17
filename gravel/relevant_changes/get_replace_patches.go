@@ -32,7 +32,7 @@ func GetReplacePatches(dbService *db.DBService, watchQuery *db.WatchQuery, chang
 	// Case 1: Old didn't match, new doesn't match -> ignore
 	if !oldMatched && !newMatched {
 
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Replace was ignored because neither the old nor the new document matched the watchquery filter.")
 	}
 
 	// Case 2: Old matched, new doesn't match -> treat as removal
@@ -40,11 +40,11 @@ func GetReplacePatches(dbService *db.DBService, watchQuery *db.WatchQuery, chang
 
 		if replacedDocumentIsInWindow {
 			// Document is in window and no longer matches, remove it
-			return removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex, change)
+			return explainPatches(watchQuery, removeSingleDocumentFromWindowAndRetrieveNewDocument(dbService, watchQuery, documentIndex, change), "Replace caused an in-window document to stop matching the filter, so Gravel removed it and filled the gap if needed.")
 		}
 
 		// Document was above the window and no longer matches
-		return checkShiftWindowOnDocumentRemovedAboveWindow(dbService, watchQuery, change, false, false)
+		return explainPatches(watchQuery, checkShiftWindowOnDocumentRemovedAboveWindow(dbService, watchQuery, change, false, false), "Replace caused a previously matching document outside the window to stop matching, so Gravel re-evaluated the window.")
 	}
 
 	// Case 3: Old didn't match, new matches -> treat as insertion
@@ -58,11 +58,11 @@ func GetReplacePatches(dbService *db.DBService, watchQuery *db.WatchQuery, chang
 		}
 
 		// Handle as if it's an insert into the window
-		return handleReplaceAsInsert(dbService, watchQuery, change, documentInfo)
+		return explainPatches(watchQuery, handleReplaceAsInsert(dbService, watchQuery, change, documentInfo), "Replace caused the document to start matching the filter, so Gravel treated it like an insertion into the watched result.")
 	}
 
 	// Case 4: Both old and new match -> need to check sorting and position
-	return handleReplaceWithBothMatching(dbService, watchQuery, change, replacedDocumentIsInWindow, documentIndex)
+	return explainPatches(watchQuery, handleReplaceWithBothMatching(dbService, watchQuery, change, replacedDocumentIsInWindow, documentIndex), "Replace kept the document matching the filter, so Gravel recomputed its position and projected value.")
 }
 
 // handleReplaceAsInsert handles the case where a replace makes a document match the query for the first time

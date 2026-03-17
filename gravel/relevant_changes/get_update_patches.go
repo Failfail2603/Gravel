@@ -680,7 +680,7 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 		// check if the field is projected but not filtered or sorted
 		// in this case we can simply check if the field is in the window and as nothing to this will change we can give back a simple update patch
 		if isProjectedField && !isFilteredField && !isSortedField && updatedDocumentIsInWindow {
-			patches = append(patches, getSimpleUpdatePatch(dbService, watchQuery, &update, documentIndex))
+			patches = append(patches, addExplanationsToPatch(getSimpleUpdatePatch(dbService, watchQuery, &update, documentIndex), "Update changed a projected field on a document already inside the window, so Gravel emitted a simple replace patch."))
 
 		} else if isFilteredField && !isSortedField {
 			filteredPatches := getSimpleFilteredUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
@@ -703,14 +703,17 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 			if matchedBefore && matchedAfter {
 				sortedPatches := getSimpleSortedUpdatePatch(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
 				sortedPatches = filterOutNonProjectedUpdates(sortedPatches, isProjectedField)
-				patches = append(patches, sortedPatches...)
+				patches = append(patches, explainPatches(watchQuery, sortedPatches, "Update changed a sorted field while the document still matched the filter, so Gravel recomputed its position in the watched window.")...)
 			}
 		} else if isFilteredField && isSortedField {
 			filteredAndSortedPatches := getFilteredAndSortedUpdatedPatches(dbService, watchQuery, change, &update, updatedDocumentIsInWindow, documentIndex)
 			filteredAndSortedPatches = filterOutNonProjectedUpdates(filteredAndSortedPatches, isProjectedField)
-			patches = append(patches, filteredAndSortedPatches...)
+			patches = append(patches, explainPatches(watchQuery, filteredAndSortedPatches, "Update changed both filtered and sorted fields, so Gravel re-evaluated membership and ordering for the watched result.")...)
 		} else {
 			// ignore everything else
+			if watchQuery.Explain {
+				patches = append(patches, explainNoop(watchQuery, "Update changed a field that is not projected, filtered, or sorted for this watchquery, so Gravel ignored it.")...)
+			}
 			continue
 		}
 

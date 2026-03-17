@@ -42,9 +42,7 @@ export interface GravelMongoWatchQueryFindOptions {
   sort?: Sort;
   skip?: number;
   limit?: number;
-
-  // whether gravel should return the full document or only the changes
-  returnFullDocument?: boolean;
+  explainGravel?: boolean;
 }
 
 export interface GravelMongoWatchQueryRequest {
@@ -53,6 +51,7 @@ export interface GravelMongoWatchQueryRequest {
   collectionName: string;
   query: string;
   options?: string;
+  explainGravel?: boolean;
   reconnect?: boolean;
 }
 
@@ -198,6 +197,7 @@ export async function generateMongoProvider(
         collectionName: storedQuery.collectionName,
         query: JSON.stringify(preprocessRegexInQuery(storedQuery.query)),
         options: JSON.stringify(storedQuery.options),
+        explainGravel: storedQuery.options?.explainGravel,
       }) satisfies GravelMongoWatchQueryRequest,
   });
 
@@ -234,6 +234,7 @@ export async function generateMongoProvider(
           collectionName,
           query: JSON.stringify(preprocessRegexInQuery(query)),
           options: JSON.stringify(options),
+          explainGravel: options?.explainGravel,
         } satisfies GravelMongoWatchQueryRequest,
       );
 

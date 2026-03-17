@@ -6,11 +6,12 @@ import (
 )
 
 type JSONPatch struct {
-	Op    string      `json:"op"`
-	Type  string      `json:"type,omitempty"`
-	From  string      `json:"from,omitempty"`
-	Path  string      `json:"path"`
-	Value interface{} `json:"value"`
+	Op           string      `json:"op"`
+	Type         string      `json:"type,omitempty"`
+	From         string      `json:"from,omitempty"`
+	Path         string      `json:"path"`
+	Value        interface{} `json:"value"`
+	Explanations []string    `json:"explanations,omitempty"`
 }
 
 // MarshalJSON implements custom JSON marshaling to conditionally omit the Value field
@@ -18,18 +19,20 @@ type JSONPatch struct {
 func (p JSONPatch) MarshalJSON() ([]byte, error) {
 	type Alias JSONPatch
 
-	// For remove operations, omit the value field entirely
-	if p.Op == "remove" {
+	// For remove and noop operations, omit the value field entirely
+	if p.Op == "remove" || p.Op == "noop" {
 		aux := &struct {
-			Op   string `json:"op"`
-			Type string `json:"type,omitempty"`
-			From string `json:"from,omitempty"`
-			Path string `json:"path"`
+			Op           string   `json:"op"`
+			Type         string   `json:"type,omitempty"`
+			From         string   `json:"from,omitempty"`
+			Path         string   `json:"path"`
+			Explanations []string `json:"explanations,omitempty"`
 		}{
-			Op:   p.Op,
-			Type: p.Type,
-			From: p.From,
-			Path: p.Path,
+			Op:           p.Op,
+			Type:         p.Type,
+			From:         p.From,
+			Path:         p.Path,
+			Explanations: p.Explanations,
 		}
 		return json.Marshal(aux)
 	}

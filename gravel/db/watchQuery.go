@@ -17,6 +17,7 @@ type WatchQuery struct {
 	Collection string
 	Query      string
 	Options    string
+	Explain    bool
 
 	// server-side deduplication: multiple clients connecting to the same database share watchqueries.
 	// this counter tracks how many client connections are using this watchquery for pooling.

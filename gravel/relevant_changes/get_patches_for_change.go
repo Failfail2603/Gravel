@@ -14,12 +14,12 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 	case "insert", "update", "delete", "replace":
 		// These operations are relevant, continue processing
 	default:
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Change operation is not supported by Gravel watchquery patch generation.")
 	}
 
 	// first trivial check. If the collection is not the same we can skip it as the change will never be relevant
 	if watchQuery.Collection != change.Collection {
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Change was ignored because it belongs to a different collection than this watchquery.")
 	}
 
 	// get individual updates for change after we did basic checks as this can get quite heavy
@@ -36,6 +36,10 @@ func GetPatchesForChange(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 		patches = GetRemovePatches(dbService, watchQuery, change)
 	case "replace":
 		patches = GetReplacePatches(dbService, watchQuery, change)
+	}
+
+	if len(patches) == 0 {
+		patches = explainNoop(watchQuery, "Change was processed but did not affect the watched query result window.")
 	}
 
 	// update the watchqueries internal document state with the patches

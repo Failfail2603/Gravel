@@ -248,8 +248,6 @@ func (gravel *GravelServer) StartListening() {
 
 		gravel.keepAliveTracker.Update(req.ClientID, req.KeepAliveIntervalMs)
 
-		log.Printf("Received client keepalive from %s", req.ClientID)
-
 		response := types.KeepAliveResponse{
 			Status: "ok",
 		}
@@ -364,6 +362,7 @@ func (gravel *GravelServer) StartListening() {
 			Collection:          req.CollectionName,
 			Query:               req.Query,
 			Options:             req.Options,
+			Explain:             req.ExplainGravel,
 			NumberOfConnections: 1,
 			QueryInformation:    queryInformation,
 		}

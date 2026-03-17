@@ -58,7 +58,7 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 	// if the document does not match the filter we can ignore it
 	if !matched {
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Insert was ignored because the new document does not match the watchquery filter.")
 	}
 
 	// the document matches the query. check if it would fall into the window
@@ -72,7 +72,7 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 	// in the case of an infinite window we can always add the document
 	if watchQuery.IsInfiniteWindow() {
-		return addDocumentToWindow(dbService, watchQuery, change, documentInfo)
+		return explainPatches(watchQuery, addDocumentToWindow(dbService, watchQuery, change, documentInfo), "Insert matched the filter and the watchquery has an infinite window, so the document was added.")
 	}
 
 	// in the case of a finite window we need to check if the document would fall into the window
@@ -86,7 +86,7 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 		// if the document is above the window we need to shift the window up
 		if positionRelativeToFirst == 1 {
-			return ShiftWindow(dbService, watchQuery, ShiftUp, change)
+			return explainPatches(watchQuery, ShiftWindow(dbService, watchQuery, ShiftUp, change), "Insert matched the filter and sorted above the current window, so the window was shifted up.")
 		}
 	}
 
@@ -95,7 +95,7 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 
 	// if the document is below the last document and the window is not exhausted we can ignore it as it would fall below the window
 	if positionRelativeToLast == -1 && !watchQuery.IsExhaustedWindow() {
-		return []json_patch.JSONPatch{}
+		return explainNoop(watchQuery, "Insert matched the filter but falls below the current result window, so no patch was emitted.")
 	}
 
 	// add a remove patch for the last document if the window is not exhausted
@@ -107,5 +107,5 @@ func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	// at this point the document is definitely in the window, so we can just add it
 	patches = append(patches, addDocumentToWindow(dbService, watchQuery, change, documentInfo)...)
 
-	return patches
+	return explainPatches(watchQuery, patches, "Insert matched the filter and falls within the watched window, so Gravel updated the result set.")
 }

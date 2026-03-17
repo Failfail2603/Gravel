@@ -33,6 +33,7 @@ async function startStuff() {
           email: 1,
           address: 1,
         },
+        explainGravel: true,
       },
     ),
   );
