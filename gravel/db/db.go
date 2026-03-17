@@ -21,7 +21,7 @@ type DBProvider interface {
 	QueryWithEvent(ctx context.Context, event *types.DBChangeStreamEvent, collection string, query string, findOptions string) []types.Document
 	StartChangeStream(natsResponseChanneldbUpdates chan types.DBChangeStreamEvent)
 	StopChangeStream()
-	TestFilterWithDocument(filterJSON string, document types.Document) (bool, error)
+	TestFilterWithDocument(query string, queryInformation types.QueryAnalysis, document types.Document) (bool, error)
 	GetDocumentID(document types.Document) string
 	GetWatchedDocumentInfo(document types.Document, queryInformation types.QueryAnalysis) (types.WatchedDocument, error)
 

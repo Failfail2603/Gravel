@@ -37,7 +37,7 @@ func GetRemovePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 	}
 
 	// after we know that the document is not in the window and could be above we need to check if the delete doc would even match the query
-	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
 	if err != nil {
 		log.Printf("Error testing filter: %v", err)
 		return []json_patch.JSONPatch{}

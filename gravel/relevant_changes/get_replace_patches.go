@@ -16,14 +16,14 @@ func GetReplacePatches(dbService *db.DBService, watchQuery *db.WatchQuery, chang
 	replacedDocumentIsInWindow, documentIndex := watchQuery.IsDocumentInWindow(change.ID)
 
 	// Test if the new document matches the filter
-	newMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocument.(primitive.M)))
+	newMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocument.(primitive.M)))
 	if err != nil {
 		log.Printf("Error testing filter with new document: %v", err)
 		return []json_patch.JSONPatch{}
 	}
 
 	// Test if the old document matched the filter
-	oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+	oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
 	if err != nil {
 		log.Printf("Error testing filter with old document: %v", err)
 		return []json_patch.JSONPatch{}

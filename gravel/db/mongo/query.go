@@ -1,10 +1,12 @@
 package mongo
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var MONGO_QUERY_KEYWORDS = []string{
@@ -86,4 +88,89 @@ func getRelevantFieldsFromQueryObject(queryObject bson.M) ([]string, error) {
 	filterFields = cleanedFields
 
 	return filterFields, nil
+}
+
+func isBasicIDLookupOrInOperation(queryObject bson.M) bool {
+	if len(queryObject) != 1 {
+		return false
+	}
+
+	idFilterRaw, exists := queryObject["_id"]
+	if !exists {
+		return false
+	}
+
+	switch idFilter := idFilterRaw.(type) {
+	case bson.M:
+		if len(idFilter) != 1 {
+			return false
+		}
+		_, hasIn := idFilter["$in"]
+		return hasIn
+	case map[string]interface{}:
+		if len(idFilter) != 1 {
+			return false
+		}
+		_, hasIn := idFilter["$in"]
+		return hasIn
+	default:
+		return true
+	}
+}
+
+func extractIDsFromQueryObject(queryObject bson.M) []string {
+	idFilterRaw, exists := queryObject["_id"]
+	if !exists {
+		return nil
+	}
+
+	convertIDToString := func(id interface{}) string {
+		switch v := id.(type) {
+		case string:
+			return v
+		case primitive.ObjectID:
+			return v.Hex()
+		default:
+			return fmt.Sprintf("%v", v)
+		}
+	}
+
+	extractIDsFromList := func(values []interface{}) []string {
+		ids := make([]string, 0, len(values))
+		for _, value := range values {
+			ids = append(ids, convertIDToString(value))
+		}
+		return ids
+	}
+
+	switch idFilter := idFilterRaw.(type) {
+	case bson.M:
+		inValuesRaw, exists := idFilter["$in"]
+		if !exists {
+			return nil
+		}
+
+		switch inValues := inValuesRaw.(type) {
+		case bson.A:
+			return extractIDsFromList([]interface{}(inValues))
+		case []interface{}:
+			return extractIDsFromList(inValues)
+		default:
+			return nil
+		}
+	case map[string]interface{}:
+		inValuesRaw, exists := idFilter["$in"]
+		if !exists {
+			return nil
+		}
+
+		switch inValues := inValuesRaw.(type) {
+		case []interface{}:
+			return extractIDsFromList(inValues)
+		default:
+			return nil
+		}
+	default:
+		return []string{convertIDToString(idFilterRaw)}
+	}
 }

@@ -50,7 +50,7 @@ func addDocumentToWindow(dbService *db.DBService, watchQuery *db.WatchQuery, cha
 func GetInsertPatches(dbService *db.DBService, watchQuery *db.WatchQuery, change *types.DBChangeStreamEvent) []json_patch.JSONPatch {
 
 	// check if the new document matches the filter
-	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocument.(primitive.M)))
+	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocument.(primitive.M)))
 	if err != nil {
 		log.Printf("Error testing filter: %v", err)
 		return []json_patch.JSONPatch{}

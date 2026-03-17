@@ -124,6 +124,12 @@ type QueryAnalysis struct {
 
 	// no projection given. This means everything is projected automatically
 	NoProjection bool
+
+	/**
+	 * Only the _id field is filtered. This means we can optimize the relevance decision tree by only checking the _id in the change-event, without needing to recheck the filter
+	 */
+	OnlyIdFilter bool
+	FilteredIDs  []string
 }
 
 // DebugMessage represents a debug message

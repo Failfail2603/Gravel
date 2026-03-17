@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import {
   GravelDBs,
   initializeGravel,
@@ -19,12 +20,18 @@ async function startStuff() {
     mongo.watchQuery(
       "users",
       {
-        email: "Selmer_Bode-Gerlach@hotmail.com",
+        _id: {
+          $in: [
+            new ObjectId("699c7469f9356c077cf4ecae"),
+            new ObjectId("699c7467f9356c077cf4ecad"),
+          ],
+        },
       },
       {
         projection: {
           _id: 1,
           email: 1,
+          address: 1,
         },
       },
     ),

@@ -100,7 +100,7 @@ func checkShiftWindowOnDocumentRemovedAboveWindow(dbService *db.DBService, watch
 	if !updateMatched && !updateInWindow && isWindowShiftApplicable(watchQuery, ShiftUp) {
 
 		// check if old document was in the cursor
-		oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+		oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
 		if err != nil {
 			log.Printf("Error testing filter: %v", err)
 			return []json_patch.JSONPatch{}
@@ -136,7 +136,7 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 
 	doc := change.FullDocument
 
-	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(doc.(primitive.M)))
+	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(doc.(primitive.M)))
 	if err != nil {
 		log.Printf("Error testing filter: %v", err)
 		return []json_patch.JSONPatch{}
@@ -164,7 +164,7 @@ func getSimpleFilteredUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQ
 
 		// at this point we know that we have no infinite window as this case would have branched of early
 		// check if old document matched
-		beforeMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+		beforeMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
 		if err != nil {
 			log.Printf("Error testing filter: %v", err)
 			return []json_patch.JSONPatch{}
@@ -437,7 +437,7 @@ func getFilteredAndSortedUpdatedPatches(dbService *db.DBService, watchQuery *db.
 
 	doc := change.FullDocument
 
-	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(doc.(primitive.M)))
+	matched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(doc.(primitive.M)))
 	if err != nil {
 		log.Printf("Error testing filter: %v", err)
 		return []json_patch.JSONPatch{}
@@ -445,7 +445,7 @@ func getFilteredAndSortedUpdatedPatches(dbService *db.DBService, watchQuery *db.
 
 	// matched
 	if matched {
-		oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+		oldMatched, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
 		if err != nil {
 			log.Printf("Error testing filter: %v", err)
 			return []json_patch.JSONPatch{}
@@ -690,12 +690,12 @@ func GetUpdatePatches(dbService *db.DBService, watchQuery *db.WatchQuery, change
 			}
 		} else if !isFilteredField && isSortedField {
 			// we only look for sorted updates if the old document even matched the query. As a field changed which is not relevant to the query itself we can disregard everything changed if the query did not match
-			matchedBefore, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
+			matchedBefore, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocumentBeforeChange.(primitive.M)))
 			if err != nil {
 				log.Printf("Error testing filter: %v", err)
 				return []json_patch.JSONPatch{}
 			}
-			matchedAfter, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, types.Document(change.FullDocument.(primitive.M)))
+			matchedAfter, err := dbService.Connection.TestFilterWithDocument(watchQuery.Query, watchQuery.QueryInformation, types.Document(change.FullDocument.(primitive.M)))
 			if err != nil {
 				log.Printf("Error testing filter: %v", err)
 				return []json_patch.JSONPatch{}

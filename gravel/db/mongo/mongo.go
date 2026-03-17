@@ -529,16 +529,26 @@ func (m *MongoProvider) handleChangeStream(changeStream *mongo.ChangeStream, dbU
 // Parameters:
 //   - filterJSON: MongoDB filter as a JSON string (e.g., `{"name": "test"}` or `{"name": {"$regex": "susan", "$options": "i"}}`)
 //   - document: The document to test (must be a map or struct)
-func (m *MongoProvider) TestFilterWithDocument(filterJSON string, document types.Document) (bool, error) {
+func (m *MongoProvider) TestFilterWithDocument(query string, queryInformation types.QueryAnalysis, document types.Document) (bool, error) {
 	if m.client == nil {
 		return false, fmt.Errorf("MongoDB client not connected")
+	}
+
+	// check if the query is an onlyId query and can be optimized
+	if queryInformation.OnlyIdFilter {
+		// for an only id query we can simply check if the id matches
+		docID, err := GetIDFromEntry(document)
+		if err != nil {
+			return false, err
+		}
+		return slices.Contains(queryInformation.FilteredIDs, docID), nil
 	}
 
 	ctx := context.Background()
 
 	// Parse the filter JSON string to BSON
 	var filter bson.M
-	if err := bson.UnmarshalExtJSON([]byte(filterJSON), true, &filter); err != nil {
+	if err := bson.UnmarshalExtJSON([]byte(query), true, &filter); err != nil {
 		return false, fmt.Errorf("failed to parse filter JSON: %w", err)
 	}
 
@@ -607,6 +617,12 @@ func (m *MongoProvider) GetQueryAnalysis(query types.WatchQueryRequest, queryRes
 	queryInformation.FilterFields, err = getRelevantFieldsFromQueryObject(queryObject)
 	if err != nil {
 		return types.QueryAnalysis{}, err
+	}
+
+	// if we only filter by _id and this filter uses only a basic lookup or $in operation, we can optimize the relevance decision tree
+	if len(queryInformation.FilterFields) == 1 && queryInformation.FilterFields[0] == "_id" {
+		queryInformation.OnlyIdFilter = isBasicIDLookupOrInOperation(queryObject)
+		queryInformation.FilteredIDs = extractIDsFromQueryObject(queryObject)
 	}
 
 	// ======== analyze sort ========
