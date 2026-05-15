@@ -126,6 +126,11 @@ func handleReplaceAsInsert(dbService *db.DBService, watchQuery *db.WatchQuery, c
 	// Get the new document at the correct position
 	newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart+newIndex)
 
+	if len(newDocuments) == 0 {
+		log.Printf("Replace: failed to fetch inserted document at window index %d", watchQuery.QueryInformation.WindowStart+newIndex)
+		return patches
+	}
+
 	// Add the document
 	patches = append(patches, GetSimpleAddPatch(newIndex, newDocuments[0]))
 
@@ -166,6 +171,11 @@ func handleReplaceInWindow(dbService *db.DBService, watchQuery *db.WatchQuery, c
 		// Document should now be above the window
 		newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart)
 
+		if len(newDocuments) == 0 {
+			log.Printf("Replace: failed to fetch replacement document at window start %d", watchQuery.QueryInformation.WindowStart)
+			return []json_patch.JSONPatch{getReplaceValuePatch(dbService, watchQuery, change, documentIndex)}
+		}
+
 		// If we get the same document back, it means it's just at the edge
 		if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[0].ID {
 
@@ -185,6 +195,11 @@ func handleReplaceInWindow(dbService *db.DBService, watchQuery *db.WatchQuery, c
 	if positionRelativeToLast == -1 {
 		// Document should now be below the window
 		newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowEnd-1)
+
+		if len(newDocuments) == 0 {
+			log.Printf("Replace: failed to fetch replacement document at window end %d", watchQuery.QueryInformation.WindowEnd-1)
+			return []json_patch.JSONPatch{getReplaceValuePatch(dbService, watchQuery, change, documentIndex)}
+		}
 
 		// If we get the same document back, it means it's just at the edge
 		if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[len(watchQuery.WatchedDocuments)-1].ID {
@@ -307,6 +322,10 @@ func handleReplaceOutsideWindow(dbService *db.DBService, watchQuery *db.WatchQue
 	// Add the document at the correct position
 	newIndex := dbService.Connection.GetPositionForDocumentInWindow(watchQuery.WatchedDocuments, newDocumentInfo, watchQuery.QueryInformation.SortFields)
 	newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart+newIndex+insertOffset)
+	if len(newDocuments) == 0 {
+		log.Printf("Replace: failed to fetch inserted document at window index %d", watchQuery.QueryInformation.WindowStart+newIndex+insertOffset)
+		return patches
+	}
 	patches = append(patches, GetSimpleAddPatch(newIndex+insertOffset, newDocuments[0]))
 
 	return patches

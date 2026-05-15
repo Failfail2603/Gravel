@@ -286,6 +286,11 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 			// query new document
 			newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowStart)
 
+			if len(newDocuments) == 0 {
+				log.Printf("Update: failed to fetch replacement document at window start %d", watchQuery.QueryInformation.WindowStart)
+				return []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex)}
+			}
+
 			// we could get the same document as before in this case we return no patches, as the value would be above the old window but not above the next position
 			if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[0].ID {
 
@@ -310,6 +315,11 @@ func getSimpleSortedUpdatePatch(dbService *db.DBService, watchQuery *db.WatchQue
 
 			// query new document at the end
 			newDocuments := GetSingleDocumentOnIndex(dbService, watchQuery, change, watchQuery.QueryInformation.WindowEnd-1)
+
+			if len(newDocuments) == 0 {
+				log.Printf("Update: failed to fetch replacement document at window end %d", watchQuery.QueryInformation.WindowEnd-1)
+				return []json_patch.JSONPatch{getSimpleUpdatePatch(dbService, watchQuery, update, documentIndex)}
+			}
 
 			// we could get the same document as before in this case we return a simple update patch, as the value would be below the old window but not below the next position
 			if dbService.Connection.GetDocumentID(newDocuments[0]) == watchQuery.WatchedDocuments[len(watchQuery.WatchedDocuments)-1].ID {
