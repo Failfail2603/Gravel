@@ -13,7 +13,7 @@ async function startStuff() {
 
   const mongo = await gravelClient.getDatabaseClient({
     db: GravelDBs.MongoDB,
-    mongoUrl: "mongodb://localhost:27017/gravel_db",
+    mongoUrl: "mongodb://mongo:27017/gravel_db",
   });
 
   const yeet = watchQueryToObservable(
@@ -21,10 +21,7 @@ async function startStuff() {
       "users",
       {
         _id: {
-          $in: [
-            new ObjectId("699c7469f9356c077cf4ecae"),
-            new ObjectId("699c7467f9356c077cf4ecad"),
-          ],
+          $in: [new ObjectId("69d10869af6d3755d212dc60")],
         },
       },
       {
