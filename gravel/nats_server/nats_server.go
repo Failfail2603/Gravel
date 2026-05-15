@@ -17,8 +17,12 @@ type NatsConnection struct {
 }
 
 func connectToNats(natsInterface *NatsConnection) error {
-	natsURL := fmt.Sprintf("nats://%s:%s",
+	connectHost := env.GetEnvOrDefault(
+		"NATS_CONNECT_HOST",
 		env.GetEnvOrDefault("NATS_HOST", "localhost"),
+	)
+	natsURL := fmt.Sprintf("nats://%s:%s",
+		connectHost,
 		env.GetEnvOrDefault("NATS_PORT", "4222"))
 
 	var err error
