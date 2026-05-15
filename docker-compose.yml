@@ -20,6 +20,19 @@ services:
       resources:
         limits:
           memory: 2G
+  gravel:
+    container_name: gravel
+    hostname: gravel
+    image: gravel:latest
+    networks:
+      mongo:
+    ports:
+      - 4222:4222
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 volumes:
   db:
 networks:
